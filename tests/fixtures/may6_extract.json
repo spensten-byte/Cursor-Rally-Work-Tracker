@@ -1,0 +1,41 @@
+{
+  "meeting_date": "2026-05-06",
+  "meeting_title": "PASE Distribution Weekly + Sizing",
+  "attendee_count": 7,
+  "at_a_glance": [
+    "Adopted L/M/H effort labels with Hrs/Wk column (L=3, M=8, H=12; 40-hr ceiling)",
+    "5 closures this week; Manu at 110% capacity (44 hrs/wk)"
+  ],
+  "decisions": [
+    "Adopted L/M/H convention and Hrs/Wk column per team capacity model"
+  ],
+  "closures": [
+    {"item": "STO US→CA", "owner": "Andrea"},
+    {"item": "GR VL32N CHG3374567 went live Apr 18", "owner": "Manu"},
+    {"item": "Stores IQ FHR/Rebound delivered", "owner": "Chris"},
+    {"item": "Hibbett ASN carton swap resolved", "owner": "Manu"},
+    {"item": "Re-send ASN job aid", "owner": "Manu"}
+  ],
+  "new_tracks": [
+    {"item": "E2E EDI Incidents → PFA/MGO Process Map", "owner": "Debarshi"},
+    {"item": "RCP Process Flow Mapping joint update", "owner": "Andrea, Chad, Manu"},
+    {"item": "AI Training (~2 hrs/wk standing item)", "owner": "Team"}
+  ],
+  "reassignments": [
+    {"item": "Tile for Gate Table", "from": "Manu", "to": "Andrea"},
+    {"item": "SKIMS RTV", "from": "Alex", "to": "Manu"}
+  ],
+  "watch_list": [
+    "Manu at 110% capacity (44 hrs/wk); EDI ASN Incident Mgmt >50% of week",
+    "WMS S/4: 309 Movement #1 Node / #2 distribution priority; CEVA/Robinson jacket issue",
+    "Lost in Transit: 3-week implementation post business + Finance approval",
+    "Chris departing — RCP mapping race to finish before handoff"
+  ],
+  "gaps": [
+    "PGI Report (Manu) moved to backlog — follow up with Jessica in Q1",
+    "Matt Kima potential new MSC owner for SKIMS RTV — not finalized"
+  ],
+  "next_steps": [
+    {"action": "Mtg with Thomas on BI integration team role", "owner": "Chris", "due": "May 7"}
+  ]
+}

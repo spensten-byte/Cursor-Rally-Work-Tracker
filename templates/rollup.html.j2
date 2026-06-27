@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PaSE Leadership Rollup — {{ rollup_date | format_date }}</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: Arial, Helvetica, sans-serif;
+    background: #FFFFFF;
+    color: #4B4B4B;
+  }
+
+  /* ── Header ── */
+  .header {
+    background: #111111;
+    padding: 32px 48px 0;
+  }
+  .header-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+  .header h1 { color: #FFFFFF; font-size: 26px; font-weight: 700; letter-spacing: 0.5px; }
+  .header .subtitle { color: #8B8B8B; font-size: 14px; margin-top: 4px; }
+  .header .date-badge { color: #8B8B8B; font-size: 13px; text-align: right; white-space: nowrap; }
+  .header .date-badge span { display: block; color: #CDDC39; font-size: 14px; font-weight: 700; }
+  .volt-bar { height: 4px; background: #CDDC39; margin-top: 24px; }
+
+  /* ── KPI Row ── */
+  .kpi-row {
+    display: flex;
+    gap: 0;
+    padding: 28px 48px;
+    border-bottom: 1px solid #D1D1D1;
+  }
+  .kpi-card {
+    flex: 1;
+    text-align: left;
+    padding: 0 24px;
+    border-right: 1px solid #D1D1D1;
+  }
+  .kpi-card:first-child { padding-left: 0; }
+  .kpi-card:last-child { border-right: none; padding-right: 0; }
+  .kpi-value { font-size: 42px; font-weight: 700; color: #111111; line-height: 1; }
+  .kpi-value.volt   { color: #CDDC39; }
+  .kpi-value.danger { color: #D22630; }
+  .kpi-value.warn   { color: #F59E0B; }
+  .kpi-label { font-size: 11px; color: #8B8B8B; text-transform: uppercase; letter-spacing: 1px; margin-top: 6px; }
+
+  /* ── Snapshot ── */
+  .snapshot {
+    background: #F5F5F5;
+    border-left: 4px solid #CDDC39;
+    margin: 24px 48px 0;
+    padding: 16px 20px;
+  }
+  .snapshot-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; color: #111111; margin-bottom: 8px; }
+  .snapshot ul { list-style: none; padding: 0; margin: 0; }
+  .snapshot li { font-size: 13px; color: #4B4B4B; padding: 3px 0; line-height: 1.5; }
+  .snapshot li::before { content: "▸"; color: #CDDC39; font-weight: 700; margin-right: 8px; }
+
+  /* ── Pillar cards ── */
+  .pillars-section { padding: 24px 48px 8px; }
+  .pillars-section-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; color: #111111; margin-bottom: 12px; }
+  .pillars-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+
+  .pillar-card {
+    border: 1px solid #E5E5E5;
+    border-left: 4px solid #16A34A;
+    padding: 14px 16px;
+  }
+  .pillar-card.has-blockers { border-left-color: #F59E0B; background: #FFFBEB; }
+  .pillar-card.missing       { border-left-color: #D1D1D1; background: #F9F9F9; }
+
+  .pillar-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+  .pillar-name { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #111111; }
+  .pillar-badge { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; padding: 2px 8px; border-radius: 2px; white-space: nowrap; }
+  .pillar-badge.clear   { background: #DCFCE7; color: #166534; }
+  .pillar-badge.warn    { background: #FEF3C7; color: #92400E; }
+  .pillar-badge.missing { background: #F3F4F6; color: #6B7280; }
+
+  .pillar-highlights { list-style: none; padding: 0; margin: 0; }
+  .pillar-highlights li { font-size: 12px; color: #4B4B4B; padding: 2px 0; line-height: 1.5; }
+  .pillar-highlights li::before { content: "▸"; color: #CDDC39; font-weight: 700; margin-right: 6px; }
+  .pillar-card.missing .pillar-highlights li { color: #8B8B8B; font-style: italic; }
+  .pillar-card.missing .pillar-highlights li::before { color: #D1D1D1; }
+
+  /* ── Content sections ── */
+  .content { padding: 24px 48px 40px; }
+  .section { margin-bottom: 20px; }
+  .section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; color: #111111; margin-bottom: 8px; }
+  .alert { background: #FEF2F2; border-left: 4px solid #D22630; padding: 14px 18px; margin-bottom: 20px; }
+  .alert .section-title { color: #991B1B; }
+  .alert li::before { color: #D22630; }
+  .info { background: #EFF6FF; border-left: 4px solid #3B82F6; padding: 14px 18px; margin-bottom: 20px; }
+  .info .section-title { color: #1D4ED8; }
+  .info li::before { color: #3B82F6; }
+  ul { list-style: none; padding: 0; }
+  li { font-size: 13px; padding: 3px 0; line-height: 1.5; }
+  li::before { content: "▸"; color: #CDDC39; font-weight: 700; margin-right: 8px; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+
+  /* ── Footer ── */
+  .footer { background: #F5F5F5; padding: 14px 48px; border-top: 1px solid #D1D1D1; font-size: 12px; color: #8B8B8B; display: flex; justify-content: space-between; align-items: center; }
+  .print-btn { display: inline-block; margin: 16px 48px; padding: 8px 20px; background: #111111; color: #CDDC39; font-size: 12px; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase; border: none; cursor: pointer; border-radius: 2px; }
+  @media print { .print-btn { display: none; } body { background: #fff; } }
+</style>
+</head>
+<body>
+
+{# ── Compute KPI counts ── #}
+{% set submitted_count = pillars_included | length %}
+{% set total_pillars = 7 %}
+{% set missing_count = [total_pillars - submitted_count, 0] | max %}
+{% set blocker_count = shared_blockers | length %}
+{% set capacity_count = capacity_risks | length %}
+
+{# ── Header ── #}
+<div class="header">
+  <div class="header-top">
+    <div>
+      <h1>Leadership Rollup</h1>
+      <div class="subtitle">PaSE Work Tracker — Cross-Pillar Executive Summary</div>
+    </div>
+    <div class="date-badge">
+      Report date
+      {% if rollup_date %}
+      <span>{{ rollup_date | format_date }}</span>
+      {% else %}
+      <span>—</span>
+      {% endif %}
+    </div>
+  </div>
+  <div class="volt-bar"></div>
+</div>
+
+{# ── KPI Row ── #}
+<div class="kpi-row">
+  <div class="kpi-card">
+    <div class="kpi-value volt">{{ submitted_count }}</div>
+    <div class="kpi-label">Pillars Submitted</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-value{% if missing_count > 0 %} danger{% endif %}">{{ missing_count }}</div>
+    <div class="kpi-label">Missing Submissions</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-value{% if blocker_count > 0 %} danger{% endif %}">{{ blocker_count }}</div>
+    <div class="kpi-label">Shared Blockers</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-value{% if capacity_count > 0 %} warn{% endif %}">{{ capacity_count }}</div>
+    <div class="kpi-label">Capacity Risks</div>
+  </div>
+</div>
+
+{# ── At a Glance ── #}
+{% if at_a_glance %}
+<div class="snapshot">
+  <div class="snapshot-title">At a glance</div>
+  <ul>
+    {% for item in at_a_glance %}
+    <li>{{ item }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+{# ── Pillar Cards ── #}
+{% if pillar_highlights %}
+<div class="pillars-section">
+  <div class="pillars-section-label">Pillar Summaries</div>
+  <div class="pillars-grid">
+    {% for ph in pillar_highlights %}
+    {% set ph_status = ph.status | default("clear") %}
+    <div class="pillar-card{% if ph_status in ["watch", "at_risk"] %} has-blockers{% endif %}">
+      <div class="pillar-header">
+        <div class="pillar-name">{{ ph.pillar }}</div>
+        <span class="pillar-badge {% if ph_status == "at_risk" %}warn{% elif ph_status == "watch" %}warn{% else %}clear{% endif %}">
+          {% if ph_status == "at_risk" %}At Risk{% elif ph_status == "watch" %}Watch{% else %}Clear{% endif %}
+        </span>
+      </div>
+      {% if ph.highlights %}
+      <ul class="pillar-highlights">
+        {% for h in ph.highlights %}
+        <li>{{ h }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+    {% endfor %}
+    {# ── Missing pillar placeholder cards ── #}
+    {% set submitted_names = pillar_highlights | map(attribute="pillar") | list %}
+    {% set all_pillar_names = ["Demand Excellence", "Order Capture & Promise Excellence", "Distribution Excellence", "Supply Excellence", "Inventory Deployment & Fulfillment Excellence", "Process Intelligence", "Process Enablement"] %}
+    {% for pname in all_pillar_names %}
+      {% if pname not in submitted_names %}
+      <div class="pillar-card missing">
+        <div class="pillar-header">
+          <div class="pillar-name">{{ pname }}</div>
+          <span class="pillar-badge missing">No Submission</span>
+        </div>
+        <ul class="pillar-highlights">
+          <li>No submission received in the selected date range.</li>
+        </ul>
+      </div>
+      {% endif %}
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{# ── Detail Sections ── #}
+<div class="content">
+
+  <div class="two-col">
+    {% if decisions_needed %}
+    <div class="info section">
+      <div class="section-title">Decisions Needed from Leadership</div>
+      <ul>{% for item in decisions_needed %}<li>{{ item }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+
+    {% if capacity_risks %}
+    <div class="alert section">
+      <div class="section-title">Capacity Risks</div>
+      <ul>{% for item in capacity_risks %}<li>{{ item }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="two-col">
+    {% if cross_pillar_dependencies %}
+    <div class="section">
+      <div class="section-title">Cross-Pillar Dependencies</div>
+      <ul>{% for item in cross_pillar_dependencies %}<li>{{ item }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+
+    {% if shared_blockers %}
+    <div class="alert section">
+      <div class="section-title">Shared Blockers</div>
+      <ul>{% for item in shared_blockers %}<li>{{ item }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if next_steps %}
+  <div class="section">
+    <div class="section-title">Next Steps</div>
+    <ul>
+      {% for item in next_steps %}
+      <li>{{ item.action }}{% if item.owner or item.due %} <em>({{ [item.owner, item.due] | select | join(' · ') }})</em>{% endif %}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+</div>
+
+<button class="print-btn" onclick="window.print()">Save as PDF</button>
+
+<div class="footer">
+  <span>{{ footer_text }}</span>
+  <span>Generated {{ generated_at }}</span>
+</div>
+
+</body>
+</html>

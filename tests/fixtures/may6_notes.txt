@@ -1,0 +1,37 @@
+PASE Distribution Weekly + Sizing — May 6, 2026
+
+Zoom AI Companion Summary
+
+Adopted L/M/H convention (Low/Med/High effort) per the team capacity model; added Hrs/Wk column. Mid-case brackets: L=3, M=8, H=12 hrs/wk. Per-person ceiling = 40 hrs/wk gross capacity.
+
+Closures:
+- STO US→CA (Andrea) — DONE
+- GR VL32N CHG3374567 went live Apr 18 (Manu)
+- Stores IQ FHR/Rebound delivered (Chris)
+- Hibbett ASN carton swap resolved (Manu)
+- Re-send ASN job aid (Manu)
+
+Backlog:
+- PGI Report (Manu) — POC let go in re-org; follow up with Jessica in Q1
+
+Reassignments:
+- Tile for Gate Table → Andrea (Manu's ticket closed)
+- SKIMS RTV → Manu from Alex; Matt Kima as potential new MSC owner replacing Jeremy
+
+New tracks:
+- Debarshi — E2E EDI Incidents → PFA/MGO Process Map (request from Prabha + Jaime, w/ Missy)
+- Andrea + Chad + Manu — RCP Process Flow Mapping joint update (race to finish before Chris leaves)
+- AI Training added for everyone (~2 hrs/wk team standing item)
+
+Lost in Transit (Chris) — major progress: tech team delivered root cause + proposed solution, 3-week implementation timeline once business + Finance approval lands. Slack channel created with action items.
+
+WMS S/4 (Chris) — 309 Movement is #1 priority for Node, #2 for distribution; new CEVA issue affecting Robinson with failed jackets now getting prioritized.
+
+Capacity read post-sizing (vs 40-hr ceiling):
+- Manu — 44 hrs/wk active load (110%); EDI ASN Incident Mgmt alone is >50% of week
+- Kyle — 34 hrs (85%); declared full capacity in meeting
+- Chris — 34 hrs (85%); departing
+
+Attendees: Kyle, Andrea, Chris, Manu, Debarshi, Chad, Jaime
+
+Next step: Chris meeting with Thomas (BI Team) on May 7 to clarify BI integration team role.

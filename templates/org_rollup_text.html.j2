@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PaSE Org Level Rollup</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: Arial, Helvetica, sans-serif;
+    background: #FFFFFF;
+    color: #4B4B4B;
+  }
+
+  /* ── Header ── */
+  .header {
+    background: #111111;
+    padding: 32px 48px 0;
+  }
+  .header-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+  .header h1 { color: #FFFFFF; font-size: 26px; font-weight: 700; letter-spacing: 0.5px; }
+  .header .subtitle { color: #8B8B8B; font-size: 14px; margin-top: 4px; }
+  .header .date-badge { color: #8B8B8B; font-size: 13px; text-align: right; white-space: nowrap; }
+  .header .date-badge span { display: block; color: #CDDC39; font-size: 14px; font-weight: 700; }
+  .volt-bar { height: 4px; background: #CDDC39; margin-top: 24px; }
+
+  /* ── Pillars row ── */
+  .pillars-row {
+    padding: 14px 48px;
+    border-bottom: 1px solid #D1D1D1;
+    font-size: 12px;
+    color: #8B8B8B;
+  }
+  .pillars-row strong { color: #111111; margin-right: 6px; }
+
+  /* ── Body ── */
+  .body-wrap {
+    padding: 32px 48px 40px;
+  }
+  .body-text {
+    white-space: pre-wrap;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 14px;
+    line-height: 1.7;
+    color: #111111;
+  }
+
+  /* ── Footer ── */
+  .footer {
+    background: #F5F5F5;
+    padding: 14px 48px;
+    border-top: 1px solid #D1D1D1;
+    font-size: 12px;
+    color: #8B8B8B;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .print-btn {
+    display: inline-block;
+    margin: 16px 48px;
+    padding: 8px 20px;
+    background: #111111;
+    color: #CDDC39;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    border: none;
+    cursor: pointer;
+    border-radius: 2px;
+  }
+  @media print { .print-btn { display: none; } body { background: #fff; } }
+</style>
+</head>
+<body>
+
+{# ── Header ── #}
+<div class="header">
+  <div class="header-top">
+    <div>
+      <h1>Org Level Rollup</h1>
+      <div class="subtitle">PaSE — VP Executive Briefing</div>
+    </div>
+    <div class="date-badge">
+      Report date
+      {% if rollup_date %}
+      <span>{{ rollup_date }}</span>
+      {% else %}
+      <span>—</span>
+      {% endif %}
+    </div>
+  </div>
+  <div class="volt-bar"></div>
+</div>
+
+{# ── Pillars row ── #}
+{% if pillars_included %}
+<div class="pillars-row">
+  <strong>Pillars:</strong>{{ pillars_included | join(', ') }}
+</div>
+{% endif %}
+
+{# ── Body ── #}
+<div class="body-wrap">
+  <div class="body-text">{{ body_text }}</div>
+</div>
+
+<button class="print-btn" onclick="window.print()">Save as PDF</button>
+
+<div class="footer">
+  <span>{{ footer_text }}</span>
+  <span>Generated {{ generated_at }}</span>
+</div>
+
+</body>
+</html>

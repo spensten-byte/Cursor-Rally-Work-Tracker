@@ -1,0 +1,22 @@
+command:
+  - streamlit
+  - run
+  - app.py
+
+env:
+  - name: DATABRICKS_HOST
+    value: "https://nike-sole-react-3.cloud.databricks.com"
+  - name: DATABRICKS_MODEL_ENDPOINT
+    value: "databricks-claude-sonnet-4-6"
+  - name: PASE_TRACKER_VOLUME
+    value: "/Volumes/development/team_na_pase_process_intelligence/pase_work_tracker"
+  - name: CONTEXT_SUMMARY_COUNT
+    value: "3"
+  - name: MOCK_LLM
+    value: "0"
+  - name: STREAMLIT_GATHER_USAGE_STATS
+    value: "false"
+  - name: PASE_TRACKER_PAT
+    valueFrom: PASE_TRACKER_PAT
+  - name: PASE_TRACKER_ADMIN_EMAILS
+    value: "Spencer.Stendel@nike.com,Evan.Horne@nike.com"

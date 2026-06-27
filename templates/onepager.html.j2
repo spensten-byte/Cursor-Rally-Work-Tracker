@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ meeting_title }} — PaSE Work Tracker</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: Arial, Helvetica, sans-serif;
+    background: #FFFFFF;
+    color: #4B4B4B;
+  }
+
+  /* ── Header ── */
+  .header {
+    background: #111111;
+    padding: 32px 48px 0;
+  }
+  .header-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+  .header h1 {
+    color: #FFFFFF;
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+  }
+  .header .subtitle {
+    color: #8B8B8B;
+    font-size: 14px;
+    margin-top: 4px;
+  }
+  .header .date-badge {
+    color: #8B8B8B;
+    font-size: 13px;
+    text-align: right;
+    white-space: nowrap;
+  }
+  .header .date-badge span {
+    display: block;
+    color: #CDDC39;
+    font-size: 14px;
+    font-weight: 700;
+  }
+  .volt-bar {
+    height: 4px;
+    background: #CDDC39;
+    margin-top: 24px;
+  }
+
+  /* ── KPI Row ── */
+  .kpi-row {
+    display: flex;
+    gap: 0;
+    padding: 28px 48px;
+    border-bottom: 1px solid #D1D1D1;
+  }
+  .kpi-card {
+    flex: 1;
+    text-align: left;
+    padding: 0 24px;
+    border-right: 1px solid #D1D1D1;
+  }
+  .kpi-card:first-child { padding-left: 0; }
+  .kpi-card:last-child { border-right: none; padding-right: 0; }
+  .kpi-value {
+    font-size: 42px;
+    font-weight: 700;
+    color: #111111;
+    line-height: 1;
+  }
+  .kpi-value.volt   { color: #CDDC39; }
+  .kpi-value.danger { color: #D22630; }
+  .kpi-value.warn   { color: #F59E0B; }
+  .kpi-label {
+    font-size: 11px;
+    color: #8B8B8B;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-top: 6px;
+  }
+
+  /* ── Snapshot (at-a-glance) ── */
+  .snapshot {
+    background: #F5F5F5;
+    border-left: 4px solid #CDDC39;
+    margin: 24px 48px 0;
+    padding: 16px 20px;
+  }
+  .snapshot-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: #111111;
+    margin-bottom: 8px;
+  }
+  .snapshot ul { list-style: none; padding: 0; margin: 0; }
+  .snapshot li {
+    font-size: 13px;
+    color: #4B4B4B;
+    padding: 3px 0;
+    line-height: 1.5;
+  }
+  .snapshot li::before {
+    content: "▸";
+    color: #CDDC39;
+    font-weight: 700;
+    margin-right: 8px;
+  }
+
+  /* ── Capacity callout ── */
+  .capacity-callout {
+    background: #FEF2F2;
+    border-left: 4px solid #D22630;
+    margin: 24px 48px 0;
+    padding: 14px 18px;
+  }
+  .capacity-callout-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: #991B1B;
+    margin-bottom: 4px;
+  }
+  .capacity-callout p { font-size: 13px; color: #4B4B4B; line-height: 1.6; }
+
+  /* ── Team member work cards ── */
+  .team-section {
+    padding: 24px 48px 8px;
+  }
+  .team-section-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: #111111;
+    margin-bottom: 12px;
+  }
+  .team-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 14px;
+  }
+  .member-card {
+    border: 1px solid #E5E5E5;
+    border-left: 4px solid #16A34A;
+    background: #FFFFFF;
+    padding: 14px 16px;
+  }
+  .member-card.heavy        { border-left-color: #F59E0B; background: #FFFBEB; }
+  .member-card.at_capacity  { border-left-color: #D22630; background: #FEF2F2; }
+  .member-card.light        { border-left-color: #3B82F6; }
+  .member-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 10px;
+  }
+  .member-name {
+    font-size: 14px;
+    font-weight: 700;
+    color: #111111;
+  }
+  .workload-badge {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    padding: 2px 8px;
+    border-radius: 2px;
+    white-space: nowrap;
+  }
+  .workload-badge.healthy     { background: #DCFCE7; color: #166534; }
+  .workload-badge.heavy       { background: #FEF3C7; color: #92400E; }
+  .workload-badge.at_capacity { background: #FEE2E2; color: #991B1B; }
+  .workload-badge.light       { background: #DBEAFE; color: #1E40AF; }
+
+  /* ── Project rows inside member card ── */
+  .project-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 0;
+    border-top: 1px solid #F0F0F0;
+  }
+  .project-body { flex: 1; min-width: 0; }
+  .project-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: #111111;
+    margin-bottom: 2px;
+  }
+  .priority-star { margin-right: 4px; }
+  .project-detail {
+    font-size: 12px;
+    color: #4B4B4B;
+    line-height: 1.5;
+    margin-bottom: 3px;
+  }
+  .project-deps {
+    font-size: 11px;
+    color: #8B8B8B;
+    font-style: italic;
+  }
+  .project-meta {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+  .tag {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 2px;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+  }
+  .tag-loe          { background: #F3F4F6; color: #374151; }
+  .tag-status       { background: #E5E7EB; color: #374151; }
+  .tag-status.in_progress { background: #DBEAFE; color: #1E40AF; }
+  .tag-status.blocked     { background: #FEE2E2; color: #991B1B; }
+  .tag-status.complete    { background: #DCFCE7; color: #166534; }
+  .tag-status.paused      { background: #F3F4F6; color: #6B7280; }
+  .tag-target       { background: #F5F5F5; color: #4B4B4B; }
+
+  /* ── Lower sections ── */
+  .content {
+    padding: 24px 48px 40px;
+  }
+  .section { margin-bottom: 20px; }
+  .section-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: #111111;
+    margin-bottom: 8px;
+  }
+  .callout {
+    background: #F5F5F5;
+    border-left: 4px solid #CDDC39;
+    padding: 16px 20px;
+    margin-bottom: 20px;
+  }
+  .watch-callout {
+    background: #FEF2F2;
+    border-left: 4px solid #D22630;
+    padding: 14px 18px;
+    margin-bottom: 20px;
+  }
+  .watch-callout .section-title { color: #991B1B; }
+  .watch-callout li::before { color: #D22630; }
+  ul { list-style: none; padding: 0; }
+  li { font-size: 13px; padding: 3px 0; line-height: 1.5; }
+  li::before {
+    content: "▸";
+    color: #CDDC39;
+    font-weight: 700;
+    margin-right: 8px;
+  }
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+
+  /* ── Item context (secondary summary line) ── */
+  .item-context {
+    font-size: 12px;
+    color: #6B6B6B;
+    font-style: italic;
+    margin-top: 2px;
+    line-height: 1.5;
+    padding-left: 16px;
+  }
+
+  /* ── Footer ── */
+  .footer {
+    background: #F5F5F5;
+    padding: 14px 48px;
+    border-top: 1px solid #D1D1D1;
+    font-size: 12px;
+    color: #8B8B8B;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .print-btn {
+    display: inline-block;
+    margin: 16px 48px;
+    padding: 8px 20px;
+    background: #111111;
+    color: #CDDC39;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    border: none;
+    cursor: pointer;
+    border-radius: 2px;
+  }
+  @media print {
+    .print-btn { display: none; }
+    body { background: #fff; }
+  }
+</style>
+</head>
+<body>
+
+{# ── Compute KPI counts from team_members ── #}
+{% set active_count = namespace(v=0) %}
+{% set blocked_count = namespace(v=0) %}
+{% set complete_count = namespace(v=0) %}
+{% if team_members %}
+  {% for m in team_members %}
+    {% for p in m.projects %}
+      {% if p.status == "complete" %}
+        {% set complete_count.v = complete_count.v + 1 %}
+      {% elif p.status == "blocked" %}
+        {% set blocked_count.v = blocked_count.v + 1 %}
+        {% set active_count.v = active_count.v + 1 %}
+      {% else %}
+        {% set active_count.v = active_count.v + 1 %}
+      {% endif %}
+    {% endfor %}
+  {% endfor %}
+{% endif %}
+{% set watch_count = watch_list | length if watch_list else 0 %}
+
+{# ── Header ── #}
+<div class="header">
+  <div class="header-top">
+    <div>
+      <h1>{{ meeting_title }}</h1>
+      {% if pillar_name %}
+      <div class="subtitle">{{ pillar_name }} · PaSE Work Tracker</div>
+      {% else %}
+      <div class="subtitle">PaSE Work Tracker</div>
+      {% endif %}
+    </div>
+    <div class="date-badge">
+      Meeting date
+      {% if meeting_date %}
+      <span>{{ meeting_date | format_date }}</span>
+      {% else %}
+      <span>—</span>
+      {% endif %}
+    </div>
+  </div>
+  <div class="volt-bar"></div>
+</div>
+
+{# ── KPI Row ── #}
+<div class="kpi-row">
+  <div class="kpi-card">
+    <div class="kpi-value">{{ active_count.v }}</div>
+    <div class="kpi-label">Active Projects</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-value{% if blocked_count.v > 0 %} danger{% endif %}">{{ blocked_count.v }}</div>
+    <div class="kpi-label">Blocked</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-value{% if watch_count > 0 %} warn{% endif %}">{{ watch_count }}</div>
+    <div class="kpi-label">Watch Items</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-value volt">{{ complete_count.v }}</div>
+    <div class="kpi-label">Completed This Week</div>
+  </div>
+</div>
+
+{# ── At a Glance ── #}
+{% if at_a_glance %}
+<div class="snapshot">
+  <div class="snapshot-title">At a glance</div>
+  <ul>
+    {% for item in at_a_glance %}
+    <li>{{ item }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+{# ── Capacity Callout ── #}
+{% if team_members %}
+  {% set overloaded = team_members | selectattr("workload", "in", ["at_capacity", "heavy"]) | list %}
+  {% if overloaded %}
+  <div class="capacity-callout">
+    <div class="capacity-callout-title">Capacity Alert</div>
+    <p>
+      {% for m in overloaded %}
+        <strong>{{ m.name }}</strong>
+        ({% if m.workload == "at_capacity" %}At Capacity{% else %}Heavy Load{% endif %}){% if not loop.last %}, {% endif %}
+      {% endfor %}
+      — review workload before adding new assignments.
+    </p>
+  </div>
+  {% endif %}
+{% endif %}
+
+{# ── Team Work Cards ── #}
+{% if team_members %}
+<div class="team-section">
+  <div class="team-section-label">Active Work by Owner</div>
+  <div class="team-grid">
+    {% for m in team_members %}
+    <div class="member-card {{ m.workload }}">
+      <div class="member-header">
+        <div class="member-name">{{ m.name }}</div>
+        <span class="workload-badge {{ m.workload }}">
+          {% if m.workload == "at_capacity" %}At Capacity
+          {% elif m.workload == "heavy" %}Heavy Load
+          {% elif m.workload == "light" %}Light
+          {% else %}Healthy
+          {% endif %}
+        </span>
+      </div>
+      {% for p in m.projects %}
+      <div class="project-row">
+        <div class="project-body">
+          <div class="project-name">
+            {% if p.is_priority %}<span class="priority-star">⭐</span>{% endif %}
+            {{ p.name }}
+          </div>
+          {% if p.detail %}
+          <div class="project-detail">{{ p.detail }}</div>
+          {% endif %}
+          {% if p.dependencies %}
+          <div class="project-deps">Dependencies: {{ p.dependencies }}</div>
+          {% endif %}
+        </div>
+        <div class="project-meta">
+          <span class="tag tag-loe">{{ p.loe }}</span>
+          <span class="tag tag-status {{ p.status }}">
+            {% if p.status == "in_progress" %}In Progress
+            {% elif p.status == "blocked" %}Blocked
+            {% elif p.status == "complete" %}Complete
+            {% elif p.status == "paused" %}Paused
+            {% else %}{{ p.status }}
+            {% endif %}
+          </span>
+          {% if p.target %}
+          <span class="tag tag-target">{{ p.target }}</span>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{# ── Lower Sections ── #}
+<div class="content">
+
+  {% if watch_list or gaps %}
+  <div class="watch-callout section">
+    <div class="section-title">Risks &amp; Open Items</div>
+    <ul>
+      {% for item in watch_list %}
+      <li>
+        <strong>{{ item.risk }}</strong>
+        {% if item.impact %}<div class="item-context">{{ item.impact }}</div>{% endif %}
+      </li>
+      {% endfor %}
+      {% for item in gaps %}
+      <li>{{ item }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  <div class="two-col">
+    {% if decisions %}
+    <div class="section">
+      <div class="section-title">Decisions</div>
+      <ul>
+        {% for item in decisions %}
+        <li>
+          <strong>{{ item.decision }}</strong>
+          {% if item.context %}<div class="item-context">{{ item.context }}</div>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
+    {% if closures %}
+    <div class="section">
+      <div class="section-title">Wins / Closures</div>
+      <ul>
+        {% for item in closures %}
+        <li>
+          <strong>{{ item.item }}{% if item.owner %} <em>({{ item.owner }})</em>{% endif %}</strong>
+          {% if item.summary %}<div class="item-context">{{ item.summary }}</div>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="two-col">
+    {% if new_tracks %}
+    <div class="section">
+      <div class="section-title">New Tracks</div>
+      <ul>
+        {% for item in new_tracks %}
+        <li>
+          <strong>{{ item.item }}{% if item.owner %} — {{ item.owner }}{% endif %}</strong>
+          {% if item.summary %}<div class="item-context">{{ item.summary }}</div>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
+    {% if reassignments %}
+    <div class="section">
+      <div class="section-title">Reassignments</div>
+      <ul>
+        {% for item in reassignments %}
+        <li>{{ item.item }}: {{ item.from }} → {{ item.to }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if next_steps %}
+  <div class="section">
+    <div class="section-title">Next Steps</div>
+    <ul>
+      {% for item in next_steps %}
+      <li>
+        {{ item.action }}
+        {% if item.owner or item.due %}
+        <em>({{ [item.owner, item.due] | select | join(' · ') }})</em>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+</div>
+
+<button class="print-btn" onclick="window.print()">Save as PDF</button>
+
+<div class="footer">
+  <span>{{ footer_text }}</span>
+  <span>Generated {{ generated_at }}</span>
+</div>
+
+</body>
+</html>

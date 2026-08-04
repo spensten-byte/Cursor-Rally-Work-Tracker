@@ -1,0 +1,30 @@
+---
+description: Push real code changes to GitHub whenever they're deployed to production
+alwaysApply: true
+---
+
+# Keep GitHub in Sync with Deployments
+
+This repo previously drifted ~5 weeks behind production because changes
+were deployed straight to Databricks (`deploy.sh` / `sync_scpo.sh` +
+`deploy_scpo.sh` / `databricks bundle deploy`) without ever being committed
+or pushed to GitHub (`spensten-byte/Cursor-Rally-Work-Tracker`).
+
+## Rule
+
+Whenever you make a **real code change** (not just local experimentation)
+and deploy it to either app (PaSE and/or SCPO), commit it and push to
+`origin/main` in the same working session — don't leave it deployed-but-
+uncommitted.
+
+- Commit with a clear message describing what changed and why.
+- Push after confirming the deploy succeeded (don't push broken code, but
+  don't let working deploys sit uncommitted either).
+- If a change is still experimental / not yet deployed, it's fine to hold
+  off on committing until it's confirmed working in production.
+- Never commit secrets, `.env`, `.databrickscfg`, or anything already
+  excluded by `.gitignore`.
+
+If you're unsure whether something counts as a "real update" worth
+committing (e.g. a one-off debug script or a reverted experiment), ask the
+user before committing.

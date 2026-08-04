@@ -175,13 +175,6 @@ st.markdown(
         display: none !important;
     }
 
-    /* Caption beside logo */
-    [data-testid="stImage"] + [data-testid="stCaptionContainer"],
-    [data-testid="stCaptionContainer"] {
-        margin-top: 0.2rem !important;
-        margin-bottom: 0.4rem !important;
-    }
-
     /* ── Section headers: orange left-border accent ── */
     h2 {
         border-left: 4px solid #f05a28 !important;
@@ -373,12 +366,10 @@ st.markdown(
         border-left-width: 3px !important;
     }
 
-    /* ── Caption below logo ── */
+    /* ── Default caption spacing (applies to every st.caption() in the app) ── */
     [data-testid="stCaptionContainer"] {
-        margin-top: 0.05rem !important;
-        margin-bottom: 0.75rem !important;
-        color: #666666 !important;
-        font-size: 12px !important;
+        margin-top: 0.35rem !important;
+        margin-bottom: 0.5rem !important;
     }
 
     /* ── All text inputs, textareas, select boxes ── */

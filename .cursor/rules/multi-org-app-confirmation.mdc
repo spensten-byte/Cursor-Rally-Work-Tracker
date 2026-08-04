@@ -1,0 +1,34 @@
+---
+description: Confirm target app (PaSE vs SCPO) before deploying or making org-specific changes
+alwaysApply: true
+---
+
+# Multi-Org Deployment Awareness
+
+This repo is a **shared codebase** deployed as two separate, independently
+running Databricks Apps:
+
+- **PaSE** (`pase-work-tracker`) — deployed from this repo root via `deploy.sh`.
+- **SCPO Process Excellence** (`scpo-process-excellence`) — deployed from the
+  sibling folder `../scpo-process-excellence`, kept in sync via `sync_scpo.sh`
+  + `deploy/scpo/deploy_scpo.sh`. Org-specific config lives in
+  `orgs/registry.py`, `orgs/pase/pillars.json`, `orgs/scpo/pillars.json`,
+  `app.yaml` (PaSE) / `deploy/scpo/app.yaml` (SCPO).
+
+Both apps read the exact same source files for shared logic (`app.py`,
+`summarizer.py`, `config.py`, etc.), so a code change here affects both —
+but each has its own UC volume, secrets, pillars, leads, and deploy target.
+
+## Before making changes or deploying, ask the user
+
+Whenever a request could plausibly apply to only one app, or involves
+running `sync_scpo.sh` / `deploy.sh` / `deploy_scpo.sh` / `databricks apps`
+commands, use `AskQuestion` to confirm scope first:
+
+- "Is this change for PaSE, SCPO, or both?"
+
+Do not assume "both" by default for anything that touches org-specific
+config (`orgs/*`, `app.yaml`, `deploy/scpo/*`, pillar/lead/member data on a
+UC volume) — confirm explicitly. Shared code changes (bug fixes, UI/CSS,
+core pipeline logic) should still be deployed to both apps to keep them in
+sync, but confirm with the user before actually pushing to production.

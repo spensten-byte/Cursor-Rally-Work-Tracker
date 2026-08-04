@@ -1,0 +1,20 @@
+---
+description: Always verify a plan includes to-dos before presenting it to the user
+alwaysApply: true
+---
+
+# Plan To-Dos Self-Check
+
+Whenever you create a plan in Plan mode (via `CreatePlan`), before presenting
+it to the user you must explicitly verify that concrete, actionable to-dos
+were included in the plan's frontmatter/todo list — not just prose steps in
+the body.
+
+- If the plan tool call did not include a `todos` array, stop and add one
+  before finishing — don't rely on the "Proposed Fix" / "Fix" prose section
+  alone as a substitute for actual to-dos.
+- Each to-do should map to a concrete, checkable unit of work from the plan
+  (e.g. one per file changed, one per verification step), not a single vague
+  catch-all item.
+- This has been missed before in this repo's workflow — treat it as a hard
+  requirement, not a nice-to-have.

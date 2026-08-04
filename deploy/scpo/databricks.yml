@@ -80,6 +80,28 @@ resources:
         pause_status: UNPAUSED
       max_concurrent_runs: 1
 
+    scpo_weekly_reminders_afternoon:
+      name: Rally weekly Slack reminders (afternoon, SCPO)
+      tasks:
+        - task_key: notify_pillar_leads
+          spark_python_task:
+            python_file: ./reminders.py
+            parameters: ["RALLY_ORG=scpo"]
+          environment_key: default
+      environments:
+        - environment_key: default
+          spec:
+            client: "1"
+            dependencies:
+              - requests>=2.31.0
+              - databricks-sdk>=0.40.0
+              - python-dotenv>=1.0.0
+      schedule:
+        quartz_cron_expression: "0 30 14 ? * THU *"
+        timezone_id: America/Los_Angeles
+        pause_status: UNPAUSED
+      max_concurrent_runs: 1
+
     scpo_weekly_status_digest:
       name: Rally weekly status digest (SCPO)
       tasks:

@@ -520,6 +520,7 @@ class MeetingSummarizer:
         data = self.validate_extract(extract)
         if pillar_name:
             data["pillar_name"] = pillar_name
+        data["meeting_title"] = data.get("meeting_title") or "Weekly Summary"
         markdown = self._render_markdown(data)
         template = self._jinja.get_template("onepager.html.j2")
         footer_text = os.getenv(
@@ -796,7 +797,7 @@ class MeetingSummarizer:
 
     def _render_markdown(self, data: dict[str, Any]) -> str:
         lines: list[str] = []
-        title = data.get("meeting_title") or "Meeting Summary"
+        title = data["meeting_title"]
         date = data.get("meeting_date") or ""
         attendees = data.get("attendees") or []
         attendee_count = data.get("attendee_count")

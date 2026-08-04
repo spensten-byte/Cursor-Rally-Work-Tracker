@@ -1,0 +1,24 @@
+command:
+  - streamlit
+  - run
+  - app.py
+
+# SCPO-specific counterpart to the main app.yaml. Databricks Apps runs
+# whatever app.yaml is present in the deployed source code, and in
+# practice that takes precedence over databricks.yml's `config.env` (the
+# reverse of what Databricks' own docs claim) — so RALLY_ORG must be set
+# here, not just in deploy/scpo/databricks.yml. sync_scpo.sh copies this
+# file into the synced folder as app.yaml, replacing the generic one.
+env:
+  - name: RALLY_ORG
+    value: scpo
+  - name: DATABRICKS_MODEL_ENDPOINT
+    value: "databricks-claude-sonnet-4-6"
+  - name: CONTEXT_SUMMARY_COUNT
+    value: "3"
+  - name: MOCK_LLM
+    value: "0"
+  - name: STREAMLIT_GATHER_USAGE_STATS
+    value: "false"
+  - name: PASE_TRACKER_PAT
+    valueFrom: PASE_TRACKER_PAT

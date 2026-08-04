@@ -1,0 +1,44 @@
+[
+  {
+    "slug": "demand-excellence",
+    "name": "Demand Excellence",
+    "short": "Demand",
+    "prompt_label": "Demand"
+  },
+  {
+    "slug": "supply-excellence",
+    "name": "Supply Excellence",
+    "short": "Supply",
+    "prompt_label": "Supply"
+  },
+  {
+    "slug": "order-capture",
+    "name": "Order Capture & Promise Excellence",
+    "short": "Order Capture",
+    "prompt_label": "Order Capture & Promise"
+  },
+  {
+    "slug": "inventory-fulfillment",
+    "name": "Inventory Deployment & Fulfillment Excellence",
+    "short": "Inventory & Fulfillment",
+    "prompt_label": "Inventory & Fulfillment"
+  },
+  {
+    "slug": "distribution-excellence",
+    "name": "Distribution Excellence",
+    "short": "Distribution",
+    "prompt_label": "Distribution"
+  },
+  {
+    "slug": "process-intelligence",
+    "name": "Process Intelligence",
+    "short": "Process Intel",
+    "prompt_label": "Process Intelligence"
+  },
+  {
+    "slug": "process-enablement",
+    "name": "Process Enablement",
+    "short": "Process Enable",
+    "prompt_label": "Process Enablement"
+  }
+]

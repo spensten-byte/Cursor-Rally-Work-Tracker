@@ -21,8 +21,10 @@ from pathlib import Path
 from typing import BinaryIO
 from zoneinfo import ZoneInfo
 
+import box_mirror
 from config import Settings, get_settings
 from pillars import DEFAULT_PILLAR_SLUG, all_slugs, get_pillar
+from time_utils import pacific_today, to_pacific_date
 
 _PACIFIC = ZoneInfo("America/Los_Angeles")
 
@@ -235,16 +237,27 @@ class MeetingStorage:
     # ------------------------------------------------------------------
 
     def _delete_file(self, path: str) -> None:
-        """Delete a single file, silently ignoring missing-file errors."""
-        try:
-            if self._use_volume and path.startswith("/Volumes/"):
+        """Delete a single file. Missing-file errors are ignored; all other
+        errors (permission, network, hang) propagate so callers can surface
+        them to the user instead of silently succeeding.
+        """
+        if self._use_volume and path.startswith("/Volumes/"):
+            try:
                 self._sdk_client().files.delete(path)
-            else:
-                p = Path(path)
-                if p.exists():
-                    p.unlink()
-        except Exception:
-            pass
+            except Exception as exc:
+                msg = str(exc).lower()
+                if (
+                    "not_found" in msg
+                    or "does not exist" in msg
+                    or "no such" in msg
+                    or "404" in msg
+                ):
+                    return
+                raise
+        else:
+            p = Path(path)
+            if p.exists():
+                p.unlink()
 
     def _write_bytes(self, path: str, data: bytes) -> None:
         if self._use_volume and path.startswith("/Volumes/"):
@@ -391,12 +404,13 @@ class MeetingStorage:
         slug = self._slug(meeting_title)
         base = f"{stamp}_{slug}"
         record_id = base
+        created_at_dt = datetime.now(timezone.utc)
 
         meta = {
             "id": record_id,
             "meeting_title": meeting_title,
             "meeting_date": meeting_date,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": created_at_dt.isoformat(),
             "source_filename": source_filename,
             "upload_path": upload_path,
             "pillar": pillar,
@@ -422,6 +436,21 @@ class MeetingStorage:
         meta["html_path"] = html_path
         meta["extract_path"] = extract_path
         self._write_bytes(meta_path, json.dumps(meta, indent=2).encode("utf-8"))
+
+        if self.settings.box_mirror_enabled and self.settings.box_root_folder_id:
+            try:
+                box_mirror.mirror_summary(
+                    self._sdk_client(),
+                    self.settings,
+                    record_id=record_id,
+                    pillar_slug=pillar,
+                    markdown=markdown,
+                    effective_dt=created_at_dt,
+                )
+            except Exception as exc:
+                # Defensive: mirror_summary already catches its own errors, but
+                # never let a Box-mirroring bug take down a real submission.
+                print(f"[rally.box_mirror] mirror_summary call raised unexpectedly: {exc}", flush=True)
 
         return SummaryRecord(
             id=record_id,
@@ -559,7 +588,7 @@ class MeetingStorage:
         }
         registry = self.load_registry(pillar)
         projects: list[dict] = registry.get("projects", [])
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        today = pacific_today().isoformat()
 
         def _find(name: str, project: str) -> dict | None:
             for p in projects:
@@ -656,6 +685,7 @@ class MeetingStorage:
         slug = self._slug(title)
         base = f"{stamp}_{slug}"
         prefix = self._rollups_prefix()
+        created_at_dt = datetime.now(timezone.utc)
 
         def _join(*parts: str) -> str:
             if self._use_volume:
@@ -676,7 +706,7 @@ class MeetingStorage:
             "title": title,
             "range_start": range_start.isoformat(),
             "range_end": range_end.isoformat(),
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": created_at_dt.isoformat(),
             "markdown_path": md_path,
             "html_path": html_path,
             "extract_path": extract_path,
@@ -685,6 +715,19 @@ class MeetingStorage:
             "kind": kind,
         }
         self._write_bytes(meta_path, json.dumps(meta, indent=2).encode("utf-8"))
+
+        if self.settings.box_mirror_enabled and self.settings.box_root_folder_id:
+            try:
+                box_mirror.mirror_rollup(
+                    self._sdk_client(),
+                    self.settings,
+                    record_id=base,
+                    kind=kind,
+                    markdown=markdown,
+                    effective_dt=created_at_dt,
+                )
+            except Exception as exc:
+                print(f"[rally.box_mirror] mirror_rollup call raised unexpectedly: {exc}", flush=True)
 
         return RollupRecord(
             id=base,
@@ -785,37 +828,6 @@ class MeetingStorage:
         if record.upload_path:
             self._delete_file(record.upload_path)
 
-    def load_all_history_context(self) -> tuple[str, int]:
-        """Return concatenated markdown for every saved summary across all pillars
-        (newest first per pillar) and the total count of summaries included."""
-        blocks: list[str] = []
-        count = 0
-        for slug in all_slugs():
-            pillar_name = get_pillar(slug).name
-            for record in self.list_summaries(limit=200, pillar=slug):
-                try:
-                    md = self._read_bytes(record.markdown_path).decode("utf-8")
-                    eff = self._record_date(record)
-                    date_str = eff.isoformat() if eff else (record.meeting_date or "no-date")
-                    blocks.append(
-                        f"=== {pillar_name} | One-pager | {record.meeting_title} | {date_str} ===\n{md}"
-                    )
-                    count += 1
-                except Exception:
-                    continue
-            notes = self.list_notes(slug)
-            if notes:
-                by_week: dict[str, list[NoteEntry]] = {}
-                for n in notes:
-                    by_week.setdefault(n.week_key or "no-week", []).append(n)
-                for wk in sorted(by_week.keys(), reverse=True):
-                    lines = [f"=== {pillar_name} | Saved notes | Week of {wk} ==="]
-                    for n in by_week[wk]:
-                        lines.append(f"[{n.author} · {n.created_at}]\n{n.text}")
-                    blocks.append("\n\n".join(lines))
-                    count += 1
-        return "\n\n".join(blocks), count
-
     def list_latest_per_pillar(self) -> dict[str, SummaryRecord | None]:
         """Return the most recent summary for each pillar slug (None if missing)."""
         latest: dict[str, SummaryRecord | None] = {slug: None for slug in all_slugs()}
@@ -830,21 +842,20 @@ class MeetingStorage:
 
     @staticmethod
     def _record_date(record: SummaryRecord) -> date | None:
-        """Return the effective date of a record for filtering purposes.
+        """Return the effective date of a record for filtering purposes, in
+        Pacific time.
 
         Prefers `created_at` (when the submission was generated) so that the
         Leadership Rollup date range filters on submission date rather than
         meeting date. This ensures recently submitted notes always surface in
         the rollup regardless of when the underlying meeting occurred.
         Falls back to `meeting_date` if `created_at` is unavailable.
+
+        `created_at` is stored as UTC ISO 8601; converting to Pacific before
+        taking the date avoids labeling submissions made after ~5 PM PT as
+        the following day (which is what raw UTC-slicing used to do).
         """
-        for raw in (record.created_at, record.meeting_date):
-            if raw:
-                try:
-                    return date.fromisoformat(raw[:10])
-                except ValueError:
-                    continue
-        return None
+        return to_pacific_date(record.created_at) or to_pacific_date(record.meeting_date)
 
     def list_in_range(
         self,

@@ -3,13 +3,18 @@ command:
   - run
   - app.py
 
+# Other org-specific values (volume path, admin emails, box folder,
+# branding, ...) are NOT set here — app.py resolves those via
+# orgs/registry.py's apply_env_defaults() before any other module import.
+# RALLY_ORG itself IS set explicitly below: databricks.yml's app resource
+# `config.env` field does not reliably override/merge with this file in
+# practice (each org now has its own physical app.yaml — see
+# deploy/scpo/app.yaml — rather than relying on that bundle field).
 env:
-  - name: DATABRICKS_HOST
-    value: "https://nike-sole-react-3.cloud.databricks.com"
+  - name: RALLY_ORG
+    value: pase
   - name: DATABRICKS_MODEL_ENDPOINT
     value: "databricks-claude-sonnet-4-6"
-  - name: PASE_TRACKER_VOLUME
-    value: "/Volumes/development/team_na_pase_process_intelligence/pase_work_tracker"
   - name: CONTEXT_SUMMARY_COUNT
     value: "3"
   - name: MOCK_LLM
@@ -18,5 +23,3 @@ env:
     value: "false"
   - name: PASE_TRACKER_PAT
     valueFrom: PASE_TRACKER_PAT
-  - name: PASE_TRACKER_ADMIN_EMAILS
-    value: "Spencer.Stendel@nike.com,Evan.Horne@nike.com"

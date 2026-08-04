@@ -1,27 +1,74 @@
-# Secrets
+# ============================================================
+# Secrets — NEVER commit
+# ============================================================
 .env
 .env.local
+.env.*.local
 *.pem
+*.key
+.databrickscfg
 
-# Databricks local state
+# ============================================================
+# Databricks
+# ============================================================
 .databricks/
+**/.databricks/
 
+# ============================================================
 # Python
+# ============================================================
 __pycache__/
 *.py[cod]
-*.egg-info/
-.pytest_cache/
+*$py.class
+*.so
+.Python
+
+# Virtual envs
 .venv/
 venv/
+env/
+ENV/
 
-# OS / editor
-.DS_Store
-Thumbs.db
-.idea/
-.vscode/
+# Build / distribution
+build/
+dist/
+*.egg-info/
+*.egg
 
+# Test / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Type checking / linting caches
+.mypy_cache/
+.ruff_cache/
+
+# ============================================================
 # Streamlit
+# ============================================================
 .streamlit/secrets.toml
 
-# Logs
+# ============================================================
+# Local data
+# ============================================================
+data/
+
+# ============================================================
+# Editor / OS
+# ============================================================
+.DS_Store
+.idea/
+.vscode/settings.json
+.vscode/launch.json
+*.swp
+*~
+
+# ============================================================
+# Logs / temp
+# ============================================================
 *.log
+*.tmp
+*.bak

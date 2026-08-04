@@ -4,6 +4,11 @@
 bundle:
   name: pase-work-tracker
 
+sync:
+  include:
+    - data/pillar_leads.json
+    - data/leadership_recipients.json
+
 variables:
   catalog:
     description: Unity Catalog name for Rally storage
@@ -21,6 +26,10 @@ resources:
       name: pase-work-tracker
       description: Rally — per-pillar work submissions and leadership rollup
       source_code_path: .
+      config:
+        env:
+          - name: RALLY_ORG
+            value: pase
       resources:
         - name: PASE_TRACKER_PAT
           description: Personal access token for UC volume access
@@ -52,6 +61,72 @@ resources:
               - python-dotenv>=1.0.0
       schedule:
         quartz_cron_expression: "0 0 9 ? * THU *"
+        timezone_id: America/Los_Angeles
+        pause_status: UNPAUSED
+      max_concurrent_runs: 1
+
+    rally_weekly_reminders_afternoon:
+      name: Rally weekly Slack reminders (afternoon)
+      tasks:
+        - task_key: notify_pillar_leads
+          spark_python_task:
+            python_file: ./reminders.py
+          environment_key: default
+      environments:
+        - environment_key: default
+          spec:
+            client: "1"
+            dependencies:
+              - requests>=2.31.0
+              - databricks-sdk>=0.40.0
+              - python-dotenv>=1.0.0
+      schedule:
+        quartz_cron_expression: "0 30 14 ? * THU *"
+        timezone_id: America/Los_Angeles
+        pause_status: UNPAUSED
+      max_concurrent_runs: 1
+
+    rally_weekly_status_digest:
+      name: Rally weekly status digest (Spencer)
+      tasks:
+        - task_key: send_digest
+          spark_python_task:
+            python_file: ./weekly_status_digest.py
+          environment_key: default
+      environments:
+        - environment_key: default
+          spec:
+            client: "1"
+            dependencies:
+              - requests>=2.31.0
+              - databricks-sdk>=0.40.0
+              - python-dotenv>=1.0.0
+      schedule:
+        quartz_cron_expression: "0 0 8 ? * FRI *"
+        timezone_id: America/Los_Angeles
+        pause_status: UNPAUSED
+      max_concurrent_runs: 1
+
+    rally_weekly_rollup:
+      name: Rally weekly leadership rollup
+      tasks:
+        - task_key: generate_and_send
+          spark_python_task:
+            python_file: ./rollups_job.py
+          environment_key: rollup_env
+      environments:
+        - environment_key: rollup_env
+          spec:
+            client: "2"
+            dependencies:
+              - requests>=2.31.0
+              - databricks-sdk>=0.40.0
+              - python-dotenv>=1.0.0
+              - openai>=1.0.0
+              - jinja2>=3.0.0
+              - boxsdk[jwt]>=10.0.0
+      schedule:
+        quartz_cron_expression: "0 0 9 ? * FRI *"
         timezone_id: America/Los_Angeles
         pause_status: UNPAUSED
       max_concurrent_runs: 1

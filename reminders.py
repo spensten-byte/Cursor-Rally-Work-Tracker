@@ -8,13 +8,10 @@ submit their one-pager in Rally.
 from __future__ import annotations
 
 import base64
-import json
+import os
 import sys
 from datetime import date, timedelta
 from pathlib import Path
-
-import requests
-from databricks.sdk import WorkspaceClient
 
 try:
     ROOT = Path(__file__).resolve().parent
@@ -25,18 +22,35 @@ except NameError:
     ROOT = Path(sys._getframe().f_code.co_filename).resolve().parent
 sys.path.insert(0, str(ROOT))
 
+# Set env defaults for this job's org (RALLY_ORG, default "pase") before any
+# other local module imports, so get_settings()/pillars.py see the right
+# volume/host/pillar-list regardless of which env vars Workflows injects.
+# Without this, DATABRICKS_HOST is empty on job compute, MeetingStorage
+# silently falls back to an empty local directory, and every pillar looks
+# unsubmitted every week.
+from orgs.registry import apply_env_defaults  # noqa: E402
+
+apply_env_defaults()
+
+import requests
+from databricks.sdk import WorkspaceClient
+
 from config import get_settings  # noqa: E402
 from pillars import PILLARS, get_pillar  # noqa: E402
+from pillar_leads import load_leads  # noqa: E402
 from storage import MeetingStorage  # noqa: E402
+from time_utils import pacific_today  # noqa: E402
 
-RALLY_URL = "https://pase-work-tracker-7474649843005973.aws.databricksapps.com/"
+RALLY_URL = os.getenv(
+    "RALLY_APP_URL", "https://pase-work-tracker-7474649843005973.aws.databricksapps.com/"
+)
 SECRET_SCOPE = "pase-work-tracker"
 SECRET_KEY = "slack-bot-token"
 
 
 def _current_week_window(today: date | None = None) -> tuple[date, date]:
     """Return (Monday, Sunday) for the ISO week containing `today`."""
-    today = today or date.today()
+    today = today or pacific_today()
     monday = today - timedelta(days=today.weekday())
     sunday = monday + timedelta(days=6)
     return monday, sunday
@@ -96,8 +110,7 @@ def main() -> int:
     ws = WorkspaceClient()
     slack_token = _read_slack_token(ws)
 
-    leads_path = ROOT / "data" / "pillar_leads.json"
-    leads: dict[str, str] = json.loads(leads_path.read_text(encoding="utf-8"))
+    leads: dict[str, list[str]] = load_leads(storage)
 
     week_start, week_end = _current_week_window()
     print(
@@ -115,30 +128,31 @@ def main() -> int:
     sent, skipped, failed = 0, 0, 0
     for slug in missing_slugs:
         pillar = get_pillar(slug)
-        email = (leads.get(slug) or "").strip()
-        if not email or email.upper().startswith("TBD"):
+        emails = [e for e in leads.get(slug, []) if not e.upper().startswith("TBD")]
+        if not emails:
             print(
                 f"[rally.reminder] Skipping {slug} \u2014 no lead email configured",
                 flush=True,
             )
             skipped += 1
             continue
-        user_id = _slack_lookup_user_id(slack_token, email)
-        if not user_id:
-            failed += 1
-            continue
-        text = (
-            f"Hi! It's Thursday \u2014 a friendly reminder to submit this week's "
-            f"*{pillar.name}* one-pager in Rally.\n{RALLY_URL}"
-        )
-        if _slack_dm(slack_token, user_id, text):
-            sent += 1
-            print(
-                f"[rally.reminder] DM sent to {email} for pillar {slug}",
-                flush=True,
+        for email in emails:
+            user_id = _slack_lookup_user_id(slack_token, email)
+            if not user_id:
+                failed += 1
+                continue
+            text = (
+                f"Hi! It's Thursday \u2014 a friendly reminder to submit this week's "
+                f"*{pillar.name}* one-pager in Rally.\n{RALLY_URL}"
             )
-        else:
-            failed += 1
+            if _slack_dm(slack_token, user_id, text):
+                sent += 1
+                print(
+                    f"[rally.reminder] DM sent to {email} for pillar {slug}",
+                    flush=True,
+                )
+            else:
+                failed += 1
 
     print(
         f"[rally.reminder] Done. sent={sent} skipped={skipped} failed={failed}",

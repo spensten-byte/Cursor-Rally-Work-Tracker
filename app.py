@@ -17,12 +17,21 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+# Resolve this deployment's org (RALLY_ORG, default "pase") and set env
+# defaults before importing config/pillars/storage, so each org's Databricks
+# App sees its own volume/admins/pillars/branding. See orgs/registry.py.
+from orgs.registry import apply_env_defaults
+
+apply_env_defaults()
+
+import pillar_leads
+import pillar_members
+import prompt_roster_sync
 from config import get_settings
 from pillars import PILLARS, Pillar, get_pillar
 from storage import MeetingStorage, NoteEntry, RollupRecord, SummaryRecord, read_uploaded_text
 from summarizer import MeetingSummarizer
-
-LEADERSHIP_CHAT_PROMPT = (ROOT / "prompts" / "leadership_chat.md").read_text(encoding="utf-8")
+from time_utils import pacific_today, to_pacific_date
 
 _PACIFIC = ZoneInfo("America/Los_Angeles")
 
@@ -206,10 +215,43 @@ st.markdown(
         border: 1px solid #e0ddd9;
         border-radius: 6px;
     }
-    .stTabs div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlock"] {
-        background-color: #ffffff;
-        border: 1px solid #e0ddd9;
-        border-radius: 6px;
+    /* Outer card: this is the single st.container(border=True) wrapping the
+       top-level view switcher pills together with whichever view is active
+       (Pillar or Leadership Rollup) and its trailing Prompts button, so the
+       card spans everything below the app-level caption. The deployed
+       Streamlit version doesn't reliably expose an `st-key-*` class for a
+       keyed container's bordered wrapper, so instead we render a plain
+       sentinel div as the first child inside the container and target the
+       wrapper via :has() of that sentinel. Scoped this way (rather than the
+       bare stVerticalBlockBorderWrapper testid) since Streamlit reuses that
+       testid for every nested bordered block (tabs, columns, expanders,
+       popovers) — an unscoped rule would style all of those too. */
+    div[data-testid="stVerticalBlockBorderWrapper"]:has(.rally-main-view-card-sentinel) {
+        background-color: #ffffff !important;
+        border: 1px solid #e0ddd9 !important;
+        border-radius: 6px !important;
+    }
+    /* Condense the vertical rhythm between top-level sections of this card
+       (switcher, pillar/rollup heading, caption, last-submission box,
+       sub-tabs, Prompts button). Scoped via "> div >" so it only matches the
+       one vertical block that is a direct child of the card wrapper —
+       confirmed via live DOM inspection to be exactly WRAPPER > div >
+       stVerticalBlock — and not any of the deeper-nested vertical blocks
+       inside the Generate/History/Team sub-tabs, whose own spacing is left
+       untouched. */
+    div[data-testid="stVerticalBlockBorderWrapper"]:has(.rally-main-view-card-sentinel) > div > [data-testid="stVerticalBlock"] {
+        gap: 0.5rem !important;
+    }
+    /* The switcher's own margin-bottom and the heading's own margin-top each
+       stack on top of the block gap above; tighten both here so the
+       switcher-to-heading transition (the worst offender, measured at 48px)
+       comes down close to the other section gaps in this card. */
+    div[data-testid="stVerticalBlockBorderWrapper"]:has(.rally-main-view-card-sentinel) div[role="radiogroup"][aria-label="View"] {
+        margin-bottom: 0.5rem !important;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"]:has(.rally-main-view-card-sentinel) h2,
+    div[data-testid="stVerticalBlockBorderWrapper"]:has(.rally-main-view-card-sentinel) h3 {
+        margin-top: 0.4rem !important;
     }
 
     /* ── Prevent button labels from wrapping mid-character ── */
@@ -257,7 +299,7 @@ st.markdown(
     .stTabs [data-baseweb="tab-list"] {
         gap: 3px;
         flex-wrap: nowrap;
-        justify-content: space-between;
+        justify-content: flex-start;
         width: 100%;
         background: transparent !important;
         border-bottom: 1px solid #e0ddd9;
@@ -568,6 +610,43 @@ st.markdown(
     [role="option"][aria-selected="true"] {
         background-color: rgba(240, 90, 40, 0.12) !important;
     }
+
+    /* ── Inline one-pager edit view ──────────────────────────────────────
+       Cosmetic labels/dividers reused while a pillar one-pager is in Edit
+       mode, so the edit screen echoes the same visual chrome as
+       templates/onepager.html.j2 (dark header band, volt accent bar,
+       colored callouts, section labels) around the native input widgets.
+       Deliberately kept to plain, non-:has() class rules — the colored
+       block backgrounds themselves (header/KPI/callout boxes) are painted
+       with inline styles directly in the HTML we emit, not injected here,
+       because Streamlit reuses the generic stVerticalBlock testid at every
+       nesting level and a :has()-based background rule risks matching and
+       recoloring unrelated ancestor containers (e.g. the outer white card)
+       instead of just the intended block. */
+    .rally-edit-kpi-value {
+        font-size: 28px;
+        font-weight: 700;
+        color: #111111;
+        line-height: 1;
+    }
+    .rally-edit-kpi-value.danger { color: #D22630; }
+    .rally-edit-kpi-value.warn { color: #F59E0B; }
+    .rally-edit-kpi-value.volt { color: #CDDC39; }
+    .rally-edit-kpi-label {
+        font-size: 10px;
+        color: #8B8B8B;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        margin-top: 2px;
+    }
+    .rally-edit-section-title {
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 1.5px;
+        color: #111111;
+        margin: 4px 0 4px;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -628,6 +707,26 @@ def _cached_pillar_history(pillar_slug: str, limit: int = 30) -> list[SummaryRec
     return _get_storage().list_summaries(limit=limit, pillar=pillar_slug)
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def _cached_latest_in_range_per_pillar(
+    range_start: date, range_end: date
+) -> dict[str, SummaryRecord | None]:
+    """Latest in-range summary per pillar for the Leadership Rollup Generate
+    sub-tab. Keyed on the date range so changing From/To triggers a fresh
+    scan. TTL 60s matches the other pillar metadata caches; explicit
+    .clear() on submit/delete keeps it fresh across writes in the same
+    session."""
+    return _get_storage().latest_in_range_per_pillar(range_start, range_end)
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _cached_rollup_history(kind: str, limit: int = 30) -> list[RollupRecord]:
+    """Saved rollups for the Leadership Rollup History sub-tab. Keyed on
+    kind so Team and Org lists cache independently. Matches
+    _cached_pillar_history's behavior."""
+    return _get_storage().list_rollups(limit=limit, kind=kind)
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def _cached_prompt_text(name: str) -> str:
     return summarizer.load_prompt(name)
@@ -638,6 +737,39 @@ def _cached_prompt_meta(name: str) -> dict | None:
     return summarizer.prompt_meta(name)
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def _load_pillar_leads() -> dict[str, list[str]]:
+    """Return {slug: [lead emails]}. A pillar may have one or several leads
+    (e.g. co-leads) — see pillar_leads.py."""
+    return pillar_leads.load_leads(storage)
+
+
+def _display_name_from_email(email: str) -> str:
+    if not email or "@" not in email:
+        return email
+    local = email.split("@", 1)[0]
+    parts = [re.sub(r"\d+$", "", p) for p in local.split(".")]
+    name = " ".join(p for p in parts if p)
+    return name or email
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _cached_pillar_members() -> dict[str, list[str]]:
+    return pillar_members.load_members(storage)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cached_record_body(record_id: str, md_path: str, html_path: str) -> tuple[str, str]:
+    """Fetch a summary/rollup record's Markdown + HTML from UC volume.
+    Records are immutable once written (submit and rerender-on-edit both go
+    through save_summary and mint a new id), so this cache is safe with no
+    TTL freshness concern. TTL bounds memory in long-lived sessions."""
+    storage = _get_storage()
+    md = storage.read_file(md_path)
+    html_content = storage.read_file(html_path)
+    return md, html_content
+
+
 _logo_bytes = (ROOT / "assets" / "rally_header.png").read_bytes()
 _logo_b64 = base64.b64encode(_logo_bytes).decode("ascii")
 st.markdown(
@@ -646,9 +778,42 @@ st.markdown(
     f'style="display:block; width:100%; height:auto; margin:0;" />',
     unsafe_allow_html=True,
 )
+_chip_html = (
+    f"<a href='{settings.box_folder_link}' target='_blank' "
+    "style='display:inline-flex; align-items:center; gap:6px; "
+    "background-color:#fff3ee; border:1px solid #f2c9b8; border-radius:14px; "
+    "padding:4px 12px; font-size:12px; font-weight:600; color:#c8481f; "
+    "text-decoration:none; white-space:nowrap;'>"
+    "&#128172; Ask questions in the Rally Box folder"
+    "</a>"
+) if settings.box_folder_link else ""
+
 st.markdown(
-    "<div style='color:#777777; font-size:13px; margin-top:0.5rem; margin-bottom:0.5rem;'>"
-    "Per-pillar work submissions, weekly tracker updates, and leadership rollups."
+    """
+    <style>
+    /* Streamlit's unsafe_allow_html sanitizer strips any inline style
+       declaration containing !important (confirmed via live DOM inspection —
+       an inline style with !important on color/font-weight was silently
+       dropped from the rendered attribute entirely). !important is required
+       here to beat the global `div, span, ... { color: #222222 !important }`
+       rule below, so — matching the .rally-main-view-card-sentinel pattern
+       used elsewhere in this file — the color/weight are set via a real
+       <style> block (not sanitized) targeting a class instead of inline. */
+    .rally-header-caption {
+        color: #c8481f !important;
+        font-weight: 700 !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+st.markdown(
+    "<div style='display:flex; align-items:center; justify-content:space-between; "
+    "flex-wrap:wrap; gap:0.5rem; margin-top:0.5rem; margin-bottom:0.75rem;'>"
+    "<div class='rally-header-caption' style='font-size:14px;'>"
+    "Weekly per-pillar submissions and leadership rollups, all in one place."
+    "</div>"
+    f"{_chip_html}"
     "</div>",
     unsafe_allow_html=True,
 )
@@ -678,7 +843,6 @@ def _prompts_dialog() -> None:
         ("extract", "Pillar Level"),
         ("rollup", "Team Level"),
         ("exec_rollup", "Org Level"),
-        ("leadership_chat", "Leadership chat"),
     ]
 
     def _render_prompt(key: str) -> None:
@@ -767,6 +931,7 @@ def _result_key(slug: str) -> str:
 
 _EDIT_FORM_FIELDS = (
     "title",
+    "date",
     "at_a_glance",
     "decisions",
     "closures",
@@ -916,7 +1081,7 @@ def render_pillar(pillar: Pillar) -> None:
     else:
         st.info("No submissions yet for this pillar.")
 
-    sub_gen, sub_hist = st.tabs(["Generate", "History"])
+    sub_gen, sub_hist, sub_team = st.tabs(["Generate", "History", "Team"])
 
     # ── Generate ──────────────────────────────────────────────────────────
     with sub_gen:
@@ -1121,6 +1286,12 @@ def render_pillar(pillar: Pillar) -> None:
                     )
                     st.rerun()
                 except Exception as exc:
+                    import traceback
+                    print(
+                        f"[rally.generate] failed for pillar={pillar.slug}: {exc!r}\n"
+                        f"{traceback.format_exc()}",
+                        flush=True,
+                    )
                     st.error(f"**Error:** {exc}")
 
         last = st.session_state.get(_result_key(pillar.slug))
@@ -1152,13 +1323,83 @@ def render_pillar(pillar: Pillar) -> None:
             _edited_extract: dict | None = None
 
             if _edit_mode_active:
-                # ── Inline edit form ──────────────────────────────────────
+                # ── Inline edit view ────────────────────────────────────────
+                # Mirrors the layout of templates/onepager.html.j2 (dark
+                # header, volt accent bar, KPI row, colored callouts,
+                # section cards) so editing happens on what looks like the
+                # generated one-pager itself, instead of a separate stacked
+                # form. Colored block backgrounds are painted with inline
+                # styles in the HTML fragments below (not global CSS) to
+                # avoid any risk of a :has()-based rule bleeding into
+                # unrelated containers elsewhere in the app. Every widget
+                # keeps its original key and parse-back logic unchanged, so
+                # Submit / rerender_from_edited behave exactly as before.
                 _edited_extract = copy.deepcopy(last["extract"])
 
-                _edited_extract["meeting_title"] = st.text_input(
-                    "Summary Title",
-                    value=_edited_extract.get("meeting_title", ""),
-                    key=f"edit_title_{pillar.slug}",
+                def _esc(text: str) -> str:
+                    return html.escape(str(text or ""))
+
+                # ── Header band (title + date on dark background) ──────────
+                st.markdown(
+                    f"""<div style="background:#111111;border-radius:6px 6px 0 0;
+                        padding:16px 24px 4px;margin-bottom:0;">
+                        <div style="color:#8B8B8B;font-size:11px;text-transform:uppercase;
+                            letter-spacing:1px;">Summary Title</div>
+                    </div>""",
+                    unsafe_allow_html=True,
+                )
+                _col_title, _col_date = st.columns([3, 1])
+                with _col_title:
+                    _edited_extract["meeting_title"] = st.text_input(
+                        "Summary Title",
+                        value=_edited_extract.get("meeting_title", ""),
+                        key=f"edit_title_{pillar.slug}",
+                        label_visibility="collapsed",
+                    )
+                with _col_date:
+                    _edited_extract["meeting_date"] = st.text_input(
+                        "Meeting date",
+                        value=_edited_extract.get("meeting_date", ""),
+                        key=f"edit_date_{pillar.slug}",
+                        help="YYYY-MM-DD",
+                    )
+                st.markdown(
+                    '<div style="height:4px;background:#CDDC39;border-radius:0 0 2px 2px;'
+                    'margin:0 0 16px;"></div>',
+                    unsafe_allow_html=True,
+                )
+
+                # ── Read-only KPI row (mirrors the template's KPI cards) ────
+                _team_members = _edited_extract.get("team_members") or []
+                _active_ct = _blocked_ct = _complete_ct = 0
+                for _m in _team_members:
+                    for _p in (_m.get("projects") or []):
+                        _status = _p.get("status")
+                        if _status == "complete":
+                            _complete_ct += 1
+                        elif _status == "blocked":
+                            _blocked_ct += 1
+                            _active_ct += 1
+                        else:
+                            _active_ct += 1
+                _watch_ct = len(_edited_extract.get("watch_list") or [])
+                _kpi_cols = st.columns(4)
+                _kpi_defs = [
+                    ("Active Projects", _active_ct, ""),
+                    ("Blocked", _blocked_ct, "danger" if _blocked_ct else ""),
+                    ("Watch Items", _watch_ct, "warn" if _watch_ct else ""),
+                    ("Completed This Week", _complete_ct, "volt"),
+                ]
+                for _kcol, (_klabel, _kval, _kcls) in zip(_kpi_cols, _kpi_defs):
+                    with _kcol:
+                        st.markdown(
+                            f'<div class="rally-edit-kpi-value {_kcls}">{_kval}</div>'
+                            f'<div class="rally-edit-kpi-label">{_esc(_klabel)}</div>',
+                            unsafe_allow_html=True,
+                        )
+                st.markdown(
+                    '<div style="border-bottom:1px solid #D1D1D1;margin:12px 0 16px;"></div>',
+                    unsafe_allow_html=True,
                 )
 
                 def _edit_list(label: str, field: str, current: list[str]) -> list[str]:
@@ -1171,6 +1412,13 @@ def render_pillar(pillar: Pillar) -> None:
                     )
                     return [line.strip() for line in raw_text.splitlines() if line.strip()]
 
+                # ── At a glance (volt callout) ───────────────────────────────
+                st.markdown(
+                    '<div style="background:#F5F5F5;border-left:4px solid #CDDC39;'
+                    'border-radius:0 4px 4px 0;padding:10px 16px 0;margin-bottom:4px;">'
+                    '<div class="rally-edit-section-title">At a glance</div></div>',
+                    unsafe_allow_html=True,
+                )
                 _edited_extract["at_a_glance"] = _edit_list(
                     "At a glance (one bullet per line)", "at_a_glance", _edited_extract.get("at_a_glance", [])
                 )
@@ -1181,62 +1429,119 @@ def render_pillar(pillar: Pillar) -> None:
                         parts.append("")
                     return parts[:n]
 
-                _decisions_lines = [
-                    " | ".join(filter(None, [d.get("decision", ""), d.get("context", "")]))
-                    if isinstance(d, dict) else str(d)
-                    for d in _edited_extract.get("decisions", [])
-                ]
-                _decisions_text = st.text_area(
-                    "Decisions",
-                    value="\n".join(_decisions_lines),
-                    height=100,
-                    key=f"edit_decisions_{pillar.slug}",
-                    help="One item per line. Format: Decision | Context (optional)",
-                )
-                _edited_extract["decisions"] = [
-                    {"decision": _split_pipe(l, 2)[0], "context": _split_pipe(l, 2)[1]}
-                    for l in _decisions_text.splitlines()
-                    if l.strip()
-                ]
+                # ── Decisions / Wins / Closures (two-column section cards) ──
+                _col_dec, _col_clo = st.columns(2)
+                with _col_dec:
+                    st.markdown(
+                        '<div class="rally-edit-section-title">Decisions</div>',
+                        unsafe_allow_html=True,
+                    )
+                    _decisions_lines = [
+                        " | ".join(filter(None, [d.get("decision", ""), d.get("context", "")]))
+                        if isinstance(d, dict) else str(d)
+                        for d in _edited_extract.get("decisions", [])
+                    ]
+                    _decisions_text = st.text_area(
+                        "Decisions",
+                        value="\n".join(_decisions_lines),
+                        height=100,
+                        key=f"edit_decisions_{pillar.slug}",
+                        help="One item per line. Format: Decision | Context (optional)",
+                        label_visibility="collapsed",
+                    )
+                    _edited_extract["decisions"] = [
+                        {"decision": _split_pipe(l, 2)[0], "context": _split_pipe(l, 2)[1]}
+                        for l in _decisions_text.splitlines()
+                        if l.strip()
+                    ]
 
-                # Wins / Closures — pipe-delimited: "Item | Owner | Summary (optional)"
-                _closures_lines = [
-                    " | ".join(filter(None, [c.get("item", ""), c.get("owner", ""), c.get("summary", "")]))
-                    if isinstance(c, dict) else str(c)
-                    for c in _edited_extract.get("closures", [])
-                ]
-                _closures_text = st.text_area(
-                    "Wins / Closures",
-                    value="\n".join(_closures_lines),
-                    height=100,
-                    key=f"edit_closures_{pillar.slug}",
-                    help="One item per line. Format: Item | Owner | Summary (optional)",
-                )
-                _edited_extract["closures"] = [
-                    {"item": _split_pipe(l, 3)[0], "owner": _split_pipe(l, 3)[1], "summary": _split_pipe(l, 3)[2]}
-                    for l in _closures_text.splitlines()
-                    if l.strip()
-                ]
+                with _col_clo:
+                    st.markdown(
+                        '<div class="rally-edit-section-title">Wins / Closures</div>',
+                        unsafe_allow_html=True,
+                    )
+                    _closures_lines = [
+                        " | ".join(filter(None, [c.get("item", ""), c.get("owner", ""), c.get("summary", "")]))
+                        if isinstance(c, dict) else str(c)
+                        for c in _edited_extract.get("closures", [])
+                    ]
+                    _closures_text = st.text_area(
+                        "Wins / Closures",
+                        value="\n".join(_closures_lines),
+                        height=100,
+                        key=f"edit_closures_{pillar.slug}",
+                        help="One item per line. Format: Item | Owner | Summary (optional)",
+                        label_visibility="collapsed",
+                    )
+                    _edited_extract["closures"] = [
+                        {"item": _split_pipe(l, 3)[0], "owner": _split_pipe(l, 3)[1], "summary": _split_pipe(l, 3)[2]}
+                        for l in _closures_text.splitlines()
+                        if l.strip()
+                    ]
 
-                # New Tracks — pipe-delimited: "Item | Owner | Summary (optional)"
-                _tracks_lines = [
-                    " | ".join(filter(None, [t.get("item", ""), t.get("owner", ""), t.get("summary", "")]))
-                    if isinstance(t, dict) else str(t)
-                    for t in _edited_extract.get("new_tracks", [])
-                ]
-                _tracks_text = st.text_area(
-                    "New Tracks",
-                    value="\n".join(_tracks_lines),
-                    height=100,
-                    key=f"edit_new_tracks_{pillar.slug}",
-                    help="One item per line. Format: Item | Owner | Summary (optional)",
-                )
-                _edited_extract["new_tracks"] = [
-                    {"item": _split_pipe(l, 3)[0], "owner": _split_pipe(l, 3)[1], "summary": _split_pipe(l, 3)[2]}
-                    for l in _tracks_text.splitlines()
-                    if l.strip()
-                ]
+                # ── New Tracks / Next Steps (two-column section cards) ──────
+                _col_trk, _col_ns = st.columns(2)
+                with _col_trk:
+                    st.markdown(
+                        '<div class="rally-edit-section-title">New Tracks</div>',
+                        unsafe_allow_html=True,
+                    )
+                    _tracks_lines = [
+                        " | ".join(filter(None, [t.get("item", ""), t.get("owner", ""), t.get("summary", "")]))
+                        if isinstance(t, dict) else str(t)
+                        for t in _edited_extract.get("new_tracks", [])
+                    ]
+                    _tracks_text = st.text_area(
+                        "New Tracks",
+                        value="\n".join(_tracks_lines),
+                        height=100,
+                        key=f"edit_new_tracks_{pillar.slug}",
+                        help="One item per line. Format: Item | Owner | Summary (optional)",
+                        label_visibility="collapsed",
+                    )
+                    _edited_extract["new_tracks"] = [
+                        {"item": _split_pipe(l, 3)[0], "owner": _split_pipe(l, 3)[1], "summary": _split_pipe(l, 3)[2]}
+                        for l in _tracks_text.splitlines()
+                        if l.strip()
+                    ]
 
+                with _col_ns:
+                    st.markdown(
+                        '<div class="rally-edit-section-title">Next Steps</div>',
+                        unsafe_allow_html=True,
+                    )
+                    _ns_raw = _edited_extract.get("next_steps", [])
+                    _ns_lines = []
+                    for _ns in _ns_raw:
+                        if isinstance(_ns, dict):
+                            _owner = _ns.get("owner", "")
+                            _action = _ns.get("action", "")
+                            _due = _ns.get("due", "")
+                            _ns_lines.append(f"{_owner} — {_action} (due: {_due})" if _owner else f"{_action} (due: {_due})" if _due else _action)
+                        else:
+                            _ns_lines.append(str(_ns))
+                    _ns_edited_text = st.text_area(
+                        "Next steps",
+                        value="\n".join(_ns_lines),
+                        height=100,
+                        key=f"edit_next_steps_{pillar.slug}",
+                        help="One item per line. Format: Owner — Action (due: date)",
+                        label_visibility="collapsed",
+                    )
+                    _edited_extract["next_steps"] = [
+                        {"action": line.strip(), "owner": "", "due": ""}
+                        for line in _ns_edited_text.splitlines()
+                        if line.strip()
+                    ]
+
+                # ── Risks & Open Items (red callout) ─────────────────────────
+                st.markdown(
+                    '<div style="background:#FEF2F2;border-left:4px solid #D22630;'
+                    'border-radius:0 4px 4px 0;padding:10px 16px 0;margin:4px 0 4px;">'
+                    '<div class="rally-edit-section-title" style="color:#991B1B;">'
+                    'Risks &amp; Open Items</div></div>',
+                    unsafe_allow_html=True,
+                )
                 # Risks & Open Items — pipe-delimited: "Risk | Impact (optional)"
                 # watch_list items are now dicts {risk, impact}; gaps remain plain strings
                 _risks_lines = [
@@ -1250,6 +1555,7 @@ def render_pillar(pillar: Pillar) -> None:
                     height=120,
                     key=f"edit_risks_{pillar.slug}",
                     help="One item per line. Format: Risk | Impact (optional)",
+                    label_visibility="collapsed",
                 )
                 _edited_extract["watch_list"] = [
                     {"risk": _split_pipe(l, 2)[0], "impact": _split_pipe(l, 2)[1]}
@@ -1257,28 +1563,6 @@ def render_pillar(pillar: Pillar) -> None:
                     if l.strip()
                 ]
                 _edited_extract["gaps"] = []
-                _ns_raw = _edited_extract.get("next_steps", [])
-                _ns_lines = []
-                for _ns in _ns_raw:
-                    if isinstance(_ns, dict):
-                        _owner = _ns.get("owner", "")
-                        _action = _ns.get("action", "")
-                        _due = _ns.get("due", "")
-                        _ns_lines.append(f"{_owner} — {_action} (due: {_due})" if _owner else f"{_action} (due: {_due})" if _due else _action)
-                    else:
-                        _ns_lines.append(str(_ns))
-                _ns_edited_text = st.text_area(
-                    "Next steps",
-                    value="\n".join(_ns_lines),
-                    height=120,
-                    key=f"edit_next_steps_{pillar.slug}",
-                    help="One item per line. Format: Owner — Action (due: date)",
-                )
-                _edited_extract["next_steps"] = [
-                    {"action": line.strip(), "owner": "", "due": ""}
-                    for line in _ns_edited_text.splitlines()
-                    if line.strip()
-                ]
 
             with col_submit_btn:
                 already_submitted = last.get("submitted", False)
@@ -1324,6 +1608,7 @@ def render_pillar(pillar: Pillar) -> None:
                         _cached_latest_per_pillar.clear()
                         _cached_pillar_recent.clear()
                         _cached_pillar_history.clear()
+                        _cached_latest_in_range_per_pillar.clear()
                         st.session_state[_result_key(pillar.slug)]["markdown"] = _final_markdown
                         st.session_state[_result_key(pillar.slug)]["html"] = _final_html
                         st.session_state[_result_key(pillar.slug)]["extract"] = copy.deepcopy(_final_extract)
@@ -1343,31 +1628,36 @@ def render_pillar(pillar: Pillar) -> None:
             if st.session_state.pop(f"submit_flash_{pillar.slug}", False):
                 st.success("Submitted to History.")
 
-            st.subheader("Preview")
-            preview_tab_md, preview_tab_html = st.tabs(["Markdown", "HTML"])
-            with preview_tab_md:
-                st.markdown(last["markdown"])
-                _dl_stem = last["extract"].get("meeting_title", "one-pager").replace(" ", "_")[:60]
-                st.download_button(
-                    "Download Markdown",
-                    last["markdown"],
-                    file_name=f"{_dl_stem}.md",
-                    mime="text/markdown",
-                    key=f"dl_md_{pillar.slug}",
-                )
-            with preview_tab_html:
-                st.components.v1.html(last["html"], height=620, scrolling=True)
-                st.caption(
-                    "Click **Save as PDF** inside the preview above, or download the HTML "
-                    "and open it in your browser to print to PDF."
-                )
-                st.download_button(
-                    "Download HTML",
-                    last["html"],
-                    file_name=f"{_dl_stem}.html",
-                    mime="text/html",
-                    key=f"dl_html_{pillar.slug}",
-                )
+            # While editing, the inline edit view above already shows the
+            # one-pager itself with editable fields — skip the styled iframe
+            # preview + download tabs so we don't stack a second (stale)
+            # rendering underneath. They reappear as soon as edit mode ends.
+            if not _edit_mode_active:
+                st.subheader("Preview")
+                preview_tab_md, preview_tab_html = st.tabs(["Markdown", "HTML"])
+                with preview_tab_md:
+                    st.markdown(last["markdown"])
+                    _dl_stem = last["extract"].get("meeting_title", "one-pager").replace(" ", "_")[:60]
+                    st.download_button(
+                        "Download Markdown",
+                        last["markdown"],
+                        file_name=f"{_dl_stem}.md",
+                        mime="text/markdown",
+                        key=f"dl_md_{pillar.slug}",
+                    )
+                with preview_tab_html:
+                    st.components.v1.html(last["html"], height=620, scrolling=True)
+                    st.caption(
+                        "Click **Save as PDF** inside the preview above, or download the HTML "
+                        "and open it in your browser to print to PDF."
+                    )
+                    st.download_button(
+                        "Download HTML",
+                        last["html"],
+                        file_name=f"{_dl_stem}.html",
+                        mime="text/html",
+                        key=f"dl_html_{pillar.slug}",
+                    )
 
         # ── This week's saved notes ───────────────────────────────────────
         st.divider()
@@ -1382,6 +1672,10 @@ def render_pillar(pillar: Pillar) -> None:
 
     # ── History ──────────────────────────────────────────────────────────
     with sub_hist:
+        _pillar_delete_flash = st.session_state.pop(f"pillar_delete_flash_{pillar.slug}", None)
+        if _pillar_delete_flash:
+            st.success(_pillar_delete_flash)
+
         _all_notes = _cached_pillar_all_notes(pillar.slug)
         if _all_notes:
             st.markdown("**Saved notes**")
@@ -1425,9 +1719,21 @@ def render_pillar(pillar: Pillar) -> None:
                     expanded=(i == selected_idx),
                 ):
                     _, col_del = st.columns([8, 1])
+                    confirm_key = f"del_confirm_{pillar.slug}_{record.id}"
                     with col_del:
-                        with st.popover("🗑 Delete", use_container_width=True):
-                            st.warning("This will permanently delete this submission. This cannot be undone.")
+                        if not st.session_state.get(confirm_key):
+                            if st.button(
+                                "🗑 Delete",
+                                key=f"del_open_{pillar.slug}_{record.id}",
+                                use_container_width=True,
+                            ):
+                                st.session_state[confirm_key] = True
+                                st.rerun()
+
+                    if st.session_state.get(confirm_key):
+                        st.warning("This will permanently delete this submission. This cannot be undone.")
+                        col_yes, col_no = st.columns([1, 4])
+                        with col_yes:
                             if st.button(
                                 "Yes, delete",
                                 key=f"del_yes_{pillar.slug}_{record.id}",
@@ -1437,34 +1743,116 @@ def render_pillar(pillar: Pillar) -> None:
                                 _cached_latest_per_pillar.clear()
                                 _cached_pillar_recent.clear()
                                 _cached_pillar_history.clear()
-                                st.success("Submission deleted.")
+                                _cached_record_body.clear()
+                                _cached_latest_in_range_per_pillar.clear()
+                                st.session_state.pop(confirm_key, None)
+                                st.session_state[f"pillar_delete_flash_{pillar.slug}"] = (
+                                    "Submission deleted."
+                                )
+                                st.rerun()
+                        with col_no:
+                            if st.button("Cancel", key=f"del_no_{pillar.slug}_{record.id}"):
+                                st.session_state.pop(confirm_key, None)
                                 st.rerun()
 
+                    if i == selected_idx:
+                        try:
+                            md, html_content = _cached_record_body(
+                                record.id, record.markdown_path, record.html_path
+                            )
+                            hist_md_tab, hist_html_tab = st.tabs(["Markdown", "HTML Preview"])
+                            with hist_md_tab:
+                                st.markdown(md)
+                                st.download_button(
+                                    "Download MD",
+                                    md,
+                                    file_name=f"{record.id}.md",
+                                    key=f"hist_md_{pillar.slug}_{record.id}",
+                                )
+                            with hist_html_tab:
+                                st.components.v1.html(html_content, height=600, scrolling=True)
+                                st.caption(
+                                    "Click **Save as PDF** inside the preview, or download the HTML and open in browser."
+                                )
+                                st.download_button(
+                                    "Download HTML",
+                                    html_content,
+                                    file_name=f"{record.id}.html",
+                                    key=f"hist_html_{pillar.slug}_{record.id}",
+                                )
+                        except Exception as exc:
+                            st.warning(f"Could not load: {exc}")
+                    else:
+                        # Not the selected record — skip the fetch + iframe render
+                        # (the dominant per-switch cost) until the user jumps to it
+                        # via the radio above. Content loads lazily, on demand.
+                        st.caption("Select this submission above to load its preview.")
+
+    # ── Team ──────────────────────────────────────────────────────────────
+    with sub_team:
+        leads = _load_pillar_leads()
+        lead_emails = leads.get(pillar.slug, [])
+        members_by_slug = _cached_pillar_members()
+        current = members_by_slug.get(pillar.slug, [])
+        is_lead = bool(lead_emails) and _current_user.strip().lower() in {
+            e.strip().lower() for e in lead_emails
+        }
+
+        director_label = (
+            ", ".join(_display_name_from_email(e) for e in lead_emails)
+            if lead_emails
+            else "_none set_"
+        )
+        st.markdown(f"**Director:** {director_label}")
+
+        editing_key = f"team_editing_{pillar.slug}"
+        is_editing = st.session_state.get(editing_key, False)
+
+        if is_lead and is_editing:
+            st.caption("Add or remove teammates. Changes save to the shared roster.")
+            edited = st.data_editor(
+                [{"name": n} for n in current] or [{"name": ""}],
+                num_rows="dynamic",
+                use_container_width=True,
+                column_config={"name": st.column_config.TextColumn(
+                    "Name", help="One team member per row", required=False,
+                )},
+                key=f"members_editor_{pillar.slug}",
+            )
+            save_col, cancel_col = st.columns(2)
+            if save_col.button("Save team", key=f"members_save_{pillar.slug}"):
+                members_by_slug[pillar.slug] = [row.get("name", "") for row in edited]
+                try:
+                    pillar_members.save_members(storage, members_by_slug)
+                    _cached_pillar_members.clear()
+                except Exception as exc:
+                    st.error(f"Save failed: {exc}")
+                else:
                     try:
-                        md = storage.read_file(record.markdown_path)
-                        html = storage.read_file(record.html_path)
-                        hist_md_tab, hist_html_tab = st.tabs(["Markdown", "HTML Preview"])
-                        with hist_md_tab:
-                            st.markdown(md)
-                            st.download_button(
-                                "Download MD",
-                                md,
-                                file_name=f"{record.id}.md",
-                                key=f"hist_md_{pillar.slug}_{record.id}",
-                            )
-                        with hist_html_tab:
-                            st.components.v1.html(html, height=600, scrolling=True)
-                            st.caption(
-                                "Click **Save as PDF** inside the preview, or download the HTML and open in browser."
-                            )
-                            st.download_button(
-                                "Download HTML",
-                                html,
-                                file_name=f"{record.id}.html",
-                                key=f"hist_html_{pillar.slug}_{record.id}",
-                            )
+                        prompt_roster_sync.sync_pillar_roster(
+                            summarizer, pillar.slug, members_by_slug[pillar.slug],
+                            edited_by=_current_user or "unknown",
+                        )
+                        _cached_prompt_text.clear()
+                        _cached_prompt_meta.clear()
+                        st.success("Team saved and prompt updated.")
                     except Exception as exc:
-                        st.warning(f"Could not load: {exc}")
+                        st.warning(f"Team saved, but the prompt could not be updated automatically: {exc}")
+                    st.session_state[editing_key] = False
+                    st.rerun()
+            if cancel_col.button("Cancel", key=f"members_cancel_{pillar.slug}"):
+                st.session_state[editing_key] = False
+                st.rerun()
+        else:
+            if current:
+                st.markdown("**Members:**")
+                st.markdown("\n".join(f"- {n}" for n in current))
+            else:
+                st.caption("No members yet.")
+            if is_lead:
+                if st.button("Edit team", key=f"members_edit_{pillar.slug}"):
+                    st.session_state[editing_key] = True
+                    st.rerun()
 
     _render_prompts_button(pillar.slug)
 
@@ -1483,7 +1871,7 @@ def render_rollup() -> None:
 
     # ── Generate sub-tab ─────────────────────────────────────────────────────
     with sub_gen:
-        today = date.today()
+        today = pacific_today()
         _week_monday = today - timedelta(days=today.weekday())
         _week_friday = _week_monday + timedelta(days=4)
         col_from, col_to = st.columns(2)
@@ -1495,7 +1883,7 @@ def render_rollup() -> None:
         if range_start > range_end:
             st.error("'From' date must be on or before the 'To' date.")
         else:
-            in_range = storage.latest_in_range_per_pillar(range_start, range_end)
+            in_range = _cached_latest_in_range_per_pillar(range_start, range_end)
             has_any = any(r is not None for r in in_range.values())
 
             if not has_any:
@@ -1523,7 +1911,7 @@ def render_rollup() -> None:
                     record = in_range[p.slug]
                     eff = MeetingStorage._record_date(record)
                     date_label = eff.strftime("%b %d, %Y") if eff else record.meeting_date or "no date"
-                    label = f"**{p.name}** — {record.meeting_title} ({date_label})"
+                    label = f"**{p.name}** — ({date_label})"
                     selections[p.slug] = st.checkbox(label, value=True, key=f"rollup_sel_{p.slug}")
 
                 if missing_pillars:
@@ -1623,7 +2011,9 @@ def render_rollup() -> None:
                                 f"{_range_label}: {', '.join(_missing)}"
                             )
                         else:
-                            st.success(f"Full coverage — all 7 pillars submitted in {_range_label}.")
+                            st.success(
+                                f"Full coverage — all {len(PILLARS)} pillars submitted in {_range_label}."
+                            )
 
                     st.subheader(label)
                     roll_md_tab, roll_html_tab = st.tabs(["Markdown", "HTML"])
@@ -1818,6 +2208,7 @@ def render_rollup() -> None:
                                 pillars_missing=rollup.get("missing", []),
                                 kind=kind,
                             )
+                            _cached_rollup_history.clear()
                             _result_state_key = "rollup_result" if kind == "team" else "org_rollup_result"
                             st.session_state[_result_state_key]["markdown"] = _final_md
                             st.session_state[_result_state_key]["html"] = _final_html
@@ -1852,8 +2243,12 @@ def render_rollup() -> None:
 
     # ── History sub-tab ───────────────────────────────────────────────────────
     with sub_hist:
+        flash = st.session_state.pop("rollup_delete_flash", None)
+        if flash:
+            st.success(flash)
+
         def _render_history_list(kind: str, key_prefix: str) -> None:
-            rollup_records = storage.list_rollups(limit=30, kind=kind)
+            rollup_records = _cached_rollup_history(kind, 30)
             if not rollup_records:
                 st.info(
                     f"No saved {kind}-level rollups yet. "
@@ -1861,7 +2256,7 @@ def render_rollup() -> None:
                 )
                 return
             labels = [
-                f"{r.title} ({r.range_start[:10]} – {r.range_end[:10]})"
+                f"{r.title} (Ran {to_pacific_date(r.created_at) or 'unknown date'})"
                 for r in rollup_records
             ]
             selected_label = st.radio(
@@ -1885,31 +2280,37 @@ def render_rollup() -> None:
                 with st.expander(label, expanded=(i == selected_idx)):
                     if pillars_line or missing_line:
                         st.caption(pillars_line + missing_line)
-                    try:
-                        rmd = storage.read_file(record.markdown_path)
-                        rhtml = storage.read_file(record.html_path)
-                        hist_md_tab, hist_html_tab = st.tabs(["Markdown", "HTML Preview"])
-                        with hist_md_tab:
-                            st.markdown(rmd)
-                            st.download_button(
-                                "Download MD",
-                                rmd,
-                                file_name=f"{record.id}.md",
-                                key=f"rollup_hist_md_{key_prefix}_{record.id}",
+                    if i == selected_idx:
+                        try:
+                            rmd, rhtml = _cached_record_body(
+                                record.id, record.markdown_path, record.html_path
                             )
-                        with hist_html_tab:
-                            st.components.v1.html(rhtml, height=600, scrolling=True)
-                            st.caption(
-                                "Click **Save as PDF** inside the preview, or download the HTML and open in browser."
-                            )
-                            st.download_button(
-                                "Download HTML",
-                                rhtml,
-                                file_name=f"{record.id}.html",
-                                key=f"rollup_hist_html_{key_prefix}_{record.id}",
-                            )
-                    except Exception as exc:
-                        st.warning(f"Could not load: {exc}")
+                            hist_md_tab, hist_html_tab = st.tabs(["Markdown", "HTML Preview"])
+                            with hist_md_tab:
+                                st.markdown(rmd)
+                                st.download_button(
+                                    "Download MD",
+                                    rmd,
+                                    file_name=f"{record.id}.md",
+                                    key=f"rollup_hist_md_{key_prefix}_{record.id}",
+                                )
+                            with hist_html_tab:
+                                st.components.v1.html(rhtml, height=600, scrolling=True)
+                                st.caption(
+                                    "Click **Save as PDF** inside the preview, or download the HTML and open in browser."
+                                )
+                                st.download_button(
+                                    "Download HTML",
+                                    rhtml,
+                                    file_name=f"{record.id}.html",
+                                    key=f"rollup_hist_html_{key_prefix}_{record.id}",
+                                )
+                        except Exception as exc:
+                            st.warning(f"Could not load: {exc}")
+                    else:
+                        # Not the selected rollup — skip the fetch + iframe render
+                        # until the user jumps to it via the radio above.
+                        st.caption("Select this rollup above to load its preview.")
 
                     st.divider()
                     confirm_key = f"rollup_del_confirm_{key_prefix}_{record.id}"
@@ -1922,10 +2323,17 @@ def render_rollup() -> None:
                                 key=f"rollup_del_yes_{key_prefix}_{record.id}",
                                 type="primary",
                             ):
-                                storage.delete_rollup(record)
-                                st.session_state.pop(confirm_key, None)
-                                st.success("Rollup deleted.")
-                                st.rerun()
+                                try:
+                                    storage.delete_rollup(record)
+                                    _cached_record_body.clear()
+                                    _cached_rollup_history.clear()
+                                    st.session_state.pop(confirm_key, None)
+                                    st.session_state["rollup_delete_flash"] = (
+                                        f"Deleted rollup: {record.title}"
+                                    )
+                                    st.rerun()
+                                except Exception as exc:
+                                    st.error(f"Delete failed: {exc}")
                         with col_no:
                             if st.button("Cancel", key=f"rollup_del_no_{key_prefix}_{record.id}"):
                                 st.session_state.pop(confirm_key, None)
@@ -1945,80 +2353,119 @@ def render_rollup() -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Ask Rally tab
+# Top-level view switcher: this org's pillars + Leadership Rollup.
+# Renders only the selected view (lazy) so untouched sections pay zero cost
+# per rerun, instead of every section executing on every interaction.
 # ─────────────────────────────────────────────────────────────────────────────
-def render_chat() -> None:
-    st.subheader("Ask about your teams")
-    st.caption(
-        "Ask questions about current and past submissions from all 7 pillars. "
-        "Answers are grounded only in archived one-pagers."
+tab_labels = [p.short for p in PILLARS] + ["Leadership Rollup"]
+
+st.markdown(
+    """
+    <style>
+    /* Scoped via aria-label="View" (the widget's label param, kept for a11y even
+       though label_visibility="collapsed" hides it visually). This avoids relying
+       on aria-orientation, which this Streamlit build does not appear to emit.
+       Descendant combinators (not >) are used throughout in case the rendered
+       markup has extra wrapper divs between levels. Pillar/rollup history radios
+       have different labels ("Jump to submission" / "Jump to rollup"), so they
+       cannot match this selector. */
+    div[role="radiogroup"][aria-label="View"] {
+        display: flex !important;
+        flex-direction: row !important;
+        flex-wrap: nowrap !important;
+        overflow-x: hidden;
+        gap: 3px !important;
+        width: 100%;
+        justify-content: flex-start;
+        border-bottom: 1px solid #e0ddd9;
+        margin-bottom: 1rem;
+        padding-bottom: 4px;
+    }
+
+    /* Each option: pill/box tab matching the Generate/History/Team sub-tabs
+       (.stTabs styling below). Padding and font-size are tightened (vs. a
+       naive 1rem/16px) so all labels fit on one line without scrolling on a
+       normal desktop viewport, regardless of how many pillars this org has. */
+    div[role="radiogroup"][aria-label="View"] label {
+        display: flex !important;
+        align-items: center;
+        margin: 0 !important;
+        padding: 4px 8px !important;
+        background-color: #ffffff !important;
+        border: 1px solid #e0ddd9 !important;
+        border-radius: 4px !important;
+        color: #111111 !important;
+        white-space: nowrap;
+        cursor: pointer;
+        transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+        flex: 0 1 auto !important;
+        font-size: 12px !important;
+        font-weight: 500 !important;
+    }
+
+    /* Hide the radio circle wherever it lives in the label's markup. */
+    div[role="radiogroup"][aria-label="View"] label > div:first-child {
+        display: none !important;
+    }
+    div[role="radiogroup"][aria-label="View"] input[type="radio"] {
+        display: none !important;
+    }
+
+    /* Hover: light orange tint, matching other hover affordances in the app. */
+    div[role="radiogroup"][aria-label="View"] label:hover {
+        border-color: #f05a28 !important;
+        color: #f05a28 !important;
+        background-color: #fff3ee !important;
+    }
+
+    /* Active label: solid orange pill, matching .stTabs [aria-selected="true"]. */
+    div[role="radiogroup"][aria-label="View"] label:has(input:checked) {
+        background-color: #f05a28 !important;
+        border-color: #f05a28 !important;
+        color: #ffffff !important;
+        font-weight: 600 !important;
+    }
+    div[role="radiogroup"][aria-label="View"] label[aria-checked="true"],
+    div[role="radiogroup"][aria-label="View"] label:has([aria-checked="true"]) {
+        background-color: #f05a28 !important;
+        border-color: #f05a28 !important;
+        color: #ffffff !important;
+        font-weight: 600 !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+main_view_card = st.container(border=True)
+
+with main_view_card:
+    # Sentinel element used purely as a CSS anchor: the deployed Streamlit
+    # version doesn't reliably expose the `key` kwarg's `st-key-*` class on
+    # the bordered wrapper div, so we target this instead via :has().
+    st.markdown(
+        '<div class="rally-main-view-card-sentinel"></div>',
+        unsafe_allow_html=True,
     )
-
-    if "chat_context" not in st.session_state:
-        with st.spinner("Loading pillar history…"):
-            context, ctx_count = storage.load_all_history_context()
-            st.session_state["chat_context"] = context
-            st.session_state["chat_context_count"] = ctx_count
-
-    ctx_count = st.session_state.get("chat_context_count", 0)
-    if ctx_count:
-        st.caption(f"Context loaded: {ctx_count} content block{'s' if ctx_count != 1 else ''} (summaries + saved notes) across all pillars.")
-    else:
-        st.caption("No archived summaries found. Generate summaries in the pillar tabs first.")
-
-    if "chat_history" not in st.session_state:
-        st.session_state["chat_history"] = []
-
-    _chat_box = st.container(height=500, border=True)
-
-    with _chat_box:
-        for msg in st.session_state["chat_history"]:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
-
-    if ctx_count and (prompt := st.chat_input("Ask a question about your teams' work…")):
-        st.session_state["chat_history"].append({"role": "user", "content": prompt})
-        with _chat_box:
-            with st.chat_message("user"):
-                st.markdown(prompt)
-
-        system_prompt = (
-            LEADERSHIP_CHAT_PROMPT
-            + "\n\n---\n\nSUMMARIES:\n\n"
-            + st.session_state["chat_context"]
+    if hasattr(st, "segmented_control"):
+        active = st.segmented_control(
+            "View",
+            options=tab_labels,
+            default=tab_labels[0],
+            label_visibility="collapsed",
+            key="active_view",
         )
-        with _chat_box:
-            with st.chat_message("assistant"):
-                with st.spinner("Thinking…"):
-                    try:
-                        reply = summarizer.chat_with_history(
-                            system=system_prompt,
-                            messages=st.session_state["chat_history"],
-                        )
-                        st.markdown(reply)
-                        st.session_state["chat_history"].append(
-                            {"role": "assistant", "content": reply}
-                        )
-                    except Exception as exc:
-                        st.error(f"**Error:** {exc}")
-    elif not ctx_count:
-        st.info("Generate at least one pillar summary to enable the chat assistant.")
+    else:
+        # Fallback for Streamlit versions without segmented_control (pre-1.37).
+        active = st.radio(
+            "View",
+            options=tab_labels,
+            horizontal=True,
+            label_visibility="collapsed",
+            key="active_view",
+        )
 
-    _render_prompts_button("chat")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Top-level tabs: 7 pillars + Leadership Rollup
-# ─────────────────────────────────────────────────────────────────────────────
-tab_labels = [p.short for p in PILLARS] + ["Leadership Rollup", "Ask Rally"]
-tabs = st.tabs(tab_labels)
-
-for tab, pillar in zip(tabs[: len(PILLARS)], PILLARS):
-    with tab:
-        render_pillar(pillar)
-
-with tabs[-2]:
-    render_rollup()
-
-with tabs[-1]:
-    render_chat()
+    if active in {p.short for p in PILLARS}:
+        render_pillar(next(p for p in PILLARS if p.short == active))
+    elif active == "Leadership Rollup":
+        render_rollup()

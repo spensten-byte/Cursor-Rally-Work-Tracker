@@ -1,0 +1,144 @@
+# Databricks Asset Bundle for the SCPO Process Excellence deployment of Rally.
+#
+# This is a SEPARATE bundle from the main pase-work-tracker one (that one
+# stays PaSE-only). It exists because Databricks Asset Bundles reject two
+# `apps` resources that share the exact same `source_code_path` inside a
+# single bundle — see the comment in ../../sync_scpo.sh for the full story.
+#
+# This file is never deployed from inside pase-work-tracker/ itself. Instead:
+#   1. Run `../../sync_scpo.sh` from the repo root — it rsyncs the shared
+#      Rally codebase into a sibling folder (default: ../scpo-process-excellence)
+#      and drops a copy of this file in as that folder's databricks.yml.
+#   2. `cd` into that sibling folder and run the normal bundle commands
+#      (`databricks bundle deploy --target prod`, `databricks bundle run ...`).
+#
+# Both orgs' behavior differences (volume path, admin emails, pillar list,
+# Box folder, branding) all come from orgs/registry.py's `scpo` entry — the
+# Python source here is byte-for-byte the same as pase-work-tracker's.
+
+bundle:
+  name: scpo-process-excellence
+
+variables:
+  catalog:
+    description: Unity Catalog name for Rally storage
+    default: development
+  schema:
+    description: Schema name for Rally storage
+    default: team_na_pase_process_intelligence
+  model_endpoint:
+    description: Foundation Model serving endpoint
+    default: databricks-claude-sonnet-4-6
+
+resources:
+  apps:
+    scpo_process_excellence:
+      name: scpo-process-excellence
+      description: Rally (SCPO Process Excellence) — work submissions and leadership rollup
+      source_code_path: .
+      config:
+        env:
+          - name: RALLY_ORG
+            value: scpo
+      resources:
+        - name: PASE_TRACKER_PAT
+          description: Personal access token for UC volume access
+          secret:
+            scope: pase-work-tracker
+            key: databricks-token
+            permission: READ
+        - name: llm_endpoint
+          description: Foundation model serving endpoint for summarization
+          serving_endpoint:
+            name: databricks-claude-sonnet-4-6
+            permission: CAN_QUERY
+
+  jobs:
+    # Same shared scripts as PaSE's jobs, routed to the scpo org config via
+    # the `RALLY_ORG=scpo` parameter (spark_python_task doesn't support
+    # setting env vars directly, only `parameters`/argv — see
+    # orgs/registry.py::_org_id_from_argv).
+    scpo_weekly_reminders:
+      name: Rally weekly Slack reminders (SCPO)
+      tasks:
+        - task_key: notify_pillar_leads
+          spark_python_task:
+            python_file: ./reminders.py
+            parameters: ["RALLY_ORG=scpo"]
+          environment_key: default
+      environments:
+        - environment_key: default
+          spec:
+            client: "1"
+            dependencies:
+              - requests>=2.31.0
+              - databricks-sdk>=0.40.0
+              - python-dotenv>=1.0.0
+      schedule:
+        quartz_cron_expression: "0 0 9 ? * THU *"
+        timezone_id: America/Los_Angeles
+        pause_status: UNPAUSED
+      max_concurrent_runs: 1
+
+    scpo_weekly_status_digest:
+      name: Rally weekly status digest (SCPO)
+      tasks:
+        - task_key: send_digest
+          spark_python_task:
+            python_file: ./weekly_status_digest.py
+            parameters: ["RALLY_ORG=scpo"]
+          environment_key: default
+      environments:
+        - environment_key: default
+          spec:
+            client: "1"
+            dependencies:
+              - requests>=2.31.0
+              - databricks-sdk>=0.40.0
+              - python-dotenv>=1.0.0
+      schedule:
+        quartz_cron_expression: "0 0 8 ? * FRI *"
+        timezone_id: America/Los_Angeles
+        pause_status: UNPAUSED
+      max_concurrent_runs: 1
+
+    scpo_weekly_rollup:
+      name: Rally weekly leadership rollup (SCPO)
+      tasks:
+        - task_key: generate_and_send
+          spark_python_task:
+            python_file: ./rollups_job.py
+            parameters: ["RALLY_ORG=scpo"]
+          environment_key: rollup_env
+      environments:
+        - environment_key: rollup_env
+          spec:
+            client: "2"
+            dependencies:
+              - requests>=2.31.0
+              - databricks-sdk>=0.40.0
+              - python-dotenv>=1.0.0
+              - openai>=1.0.0
+              - jinja2>=3.0.0
+              - boxsdk[jwt]>=10.0.0
+      schedule:
+        quartz_cron_expression: "0 0 9 ? * FRI *"
+        timezone_id: America/Los_Angeles
+        pause_status: UNPAUSED
+      max_concurrent_runs: 1
+
+targets:
+  dev:
+    default: true
+    workspace:
+      host: https://nike-sole-react-3.cloud.databricks.com
+    variables:
+      catalog: development
+      schema: team_na_pase_process_intelligence
+
+  prod:
+    workspace:
+      host: https://nike-sole-react-3.cloud.databricks.com
+    variables:
+      catalog: development
+      schema: team_na_pase_process_intelligence

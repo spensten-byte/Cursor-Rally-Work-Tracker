@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{{ meeting_title }} — PaSE Work Tracker</title>
+<title>{{ meeting_title }} — {{ org_label | default('PaSE') }} Work Tracker</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -342,9 +342,9 @@
     <div>
       <h1>{{ meeting_title }}</h1>
       {% if pillar_name %}
-      <div class="subtitle">{{ pillar_name }} · PaSE Work Tracker</div>
+      <div class="subtitle">{{ pillar_name }} · {{ org_label | default('PaSE') }} Work Tracker</div>
       {% else %}
-      <div class="subtitle">PaSE Work Tracker</div>
+      <div class="subtitle">{{ org_label | default('PaSE') }} Work Tracker</div>
       {% endif %}
     </div>
     <div class="date-badge">

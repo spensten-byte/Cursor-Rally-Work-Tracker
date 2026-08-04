@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PaSE Org Level Rollup</title>
+<title>{{ org_label | default('PaSE') }} Org Level Rollup</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -85,7 +85,7 @@
   <div class="header-top">
     <div>
       <h1>Org Level Rollup</h1>
-      <div class="subtitle">PaSE — VP Executive Briefing</div>
+      <div class="subtitle">{{ org_label | default('PaSE') }} — VP Executive Briefing</div>
     </div>
     <div class="date-badge">
       Report date

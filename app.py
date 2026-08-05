@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import copy
 import html
+import inspect
 import re
 import sys
 from datetime import date, datetime, timedelta, timezone
@@ -645,6 +646,13 @@ st.markdown(
 
 settings = get_settings()
 
+# st.tabs(default=...) was only added in Streamlit 1.50 — the exact version
+# available at runtime can lag behind what's pinned in requirements.txt
+# (`streamlit>=1.32.0`), so probe for it once instead of assuming it's there.
+# Falls back to plain st.tabs() (first tab always selected after a rerun) on
+# older versions rather than crashing with a TypeError.
+_TABS_SUPPORTS_DEFAULT = "default" in inspect.signature(st.tabs).parameters
+
 # Databricks Apps injects user identity via several possible headers.
 # X-Forwarded-User often carries a numeric workspace ID rather than an email;
 # try email-bearing headers first so admin comparisons work correctly.
@@ -1083,10 +1091,13 @@ def render_pillar(pillar: Pillar) -> None:
     _team_editing_key = f"team_editing_{pillar.slug}"
     _team_stay_key = f"team_tab_stay_{pillar.slug}"
     _stay_on_team = st.session_state.pop(_team_stay_key, False)
-    sub_gen, sub_hist, sub_team = st.tabs(
-        ["Generate", "History", "Team"],
-        default="Team" if (st.session_state.get(_team_editing_key) or _stay_on_team) else None,
-    )
+    if _TABS_SUPPORTS_DEFAULT:
+        sub_gen, sub_hist, sub_team = st.tabs(
+            ["Generate", "History", "Team"],
+            default="Team" if (st.session_state.get(_team_editing_key) or _stay_on_team) else None,
+        )
+    else:
+        sub_gen, sub_hist, sub_team = st.tabs(["Generate", "History", "Team"])
 
     # ── Generate ──────────────────────────────────────────────────────────
     with sub_gen:

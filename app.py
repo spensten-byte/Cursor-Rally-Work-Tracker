@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 import copy
 import html
-import inspect
 import re
 import sys
 from datetime import date, datetime, timedelta, timezone
@@ -646,13 +645,6 @@ st.markdown(
 
 settings = get_settings()
 
-# st.tabs(default=...) was only added in Streamlit 1.50 — the exact version
-# available at runtime can lag behind what's pinned in requirements.txt
-# (`streamlit>=1.32.0`), so probe for it once instead of assuming it's there.
-# Falls back to plain st.tabs() (first tab always selected after a rerun) on
-# older versions rather than crashing with a TypeError.
-_TABS_SUPPORTS_DEFAULT = "default" in inspect.signature(st.tabs).parameters
-
 # Databricks Apps injects user identity via several possible headers.
 # X-Forwarded-User often carries a numeric workspace ID rather than an email;
 # try email-bearing headers first so admin comparisons work correctly.
@@ -1080,27 +1072,35 @@ def render_pillar(pillar: Pillar) -> None:
     else:
         st.info("No submissions yet for this pillar.")
 
-    # Keep the Team sub-tab selected across the rerun triggered by the
-    # "Edit team" / "Save team" / "Cancel" buttons below (st.tabs snaps back
-    # to "Generate" — the first tab — on every st.rerun() unless told
-    # otherwise). `_team_stay_key` is a one-shot flag: the button handlers set
-    # it right before calling st.rerun(), and popping it here consumes it so
-    # it only pins the very next render — later, unrelated reruns (e.g. from
-    # the Generate tab) fall back to normal tab behavior instead of getting
-    # stuck on Team.
-    _team_editing_key = f"team_editing_{pillar.slug}"
-    _team_stay_key = f"team_tab_stay_{pillar.slug}"
-    _stay_on_team = st.session_state.pop(_team_stay_key, False)
-    if _TABS_SUPPORTS_DEFAULT:
-        sub_gen, sub_hist, sub_team = st.tabs(
-            ["Generate", "History", "Team"],
-            default="Team" if (st.session_state.get(_team_editing_key) or _stay_on_team) else None,
+    # st.tabs() has no session-tied state of its own — the selected tab always
+    # snaps back to the first one ("Generate") on every st.rerun(), which made
+    # the Team tab's Edit/Save/Cancel buttons feel like they kicked you back
+    # to Generate. Swap to a key-bound widget (same pattern as the top-level
+    # pillar/rollup switcher below) so the selection persists in
+    # session_state across reruns, with no extra bookkeeping needed — and per
+    # Streamlit's own guidance, this also means only the active section's
+    # content is computed each run instead of all three every time.
+    _sub_options = ["Generate", "History", "Team"]
+    _sub_key = f"active_sub_{pillar.slug}"
+    if hasattr(st, "segmented_control"):
+        active_sub = st.segmented_control(
+            "Section",
+            options=_sub_options,
+            default=_sub_options[0],
+            label_visibility="collapsed",
+            key=_sub_key,
         )
     else:
-        sub_gen, sub_hist, sub_team = st.tabs(["Generate", "History", "Team"])
+        active_sub = st.radio(
+            "Section",
+            options=_sub_options,
+            horizontal=True,
+            label_visibility="collapsed",
+            key=_sub_key,
+        )
 
     # ── Generate ──────────────────────────────────────────────────────────
-    with sub_gen:
+    if active_sub == "Generate":
         uploaded = st.file_uploader(
             "Meeting notes",
             type=["txt", "md", "docx", "pdf", "xlsx", "xls"],
@@ -1687,7 +1687,7 @@ def render_pillar(pillar: Pillar) -> None:
 
 
     # ── History ──────────────────────────────────────────────────────────
-    with sub_hist:
+    if active_sub == "History":
         _pillar_delete_flash = st.session_state.pop(f"pillar_delete_flash_{pillar.slug}", None)
         if _pillar_delete_flash:
             st.success(_pillar_delete_flash)
@@ -1805,7 +1805,7 @@ def render_pillar(pillar: Pillar) -> None:
                         st.caption("Select this submission above to load its preview.")
 
     # ── Team ──────────────────────────────────────────────────────────────
-    with sub_team:
+    if active_sub == "Team":
         leads = _load_pillar_leads()
         lead_emails = leads.get(pillar.slug, [])
         members_by_slug = _cached_pillar_members()
@@ -1822,7 +1822,7 @@ def render_pillar(pillar: Pillar) -> None:
         )
         st.markdown(f"**Director:** {director_label}")
 
-        editing_key = _team_editing_key
+        editing_key = f"team_editing_{pillar.slug}"
         is_editing = st.session_state.get(editing_key, False)
 
         if is_lead and is_editing:
@@ -1856,11 +1856,9 @@ def render_pillar(pillar: Pillar) -> None:
                     except Exception as exc:
                         st.warning(f"Team saved, but the prompt could not be updated automatically: {exc}")
                     st.session_state[editing_key] = False
-                    st.session_state[_team_stay_key] = True
                     st.rerun()
             if cancel_col.button("Cancel", key=f"members_cancel_{pillar.slug}"):
                 st.session_state[editing_key] = False
-                st.session_state[_team_stay_key] = True
                 st.rerun()
         else:
             if current:
@@ -2381,14 +2379,17 @@ tab_labels = [p.short for p in PILLARS] + ["Leadership Rollup"]
 st.markdown(
     """
     <style>
-    /* Scoped via aria-label="View" (the widget's label param, kept for a11y even
-       though label_visibility="collapsed" hides it visually). This avoids relying
-       on aria-orientation, which this Streamlit build does not appear to emit.
-       Descendant combinators (not >) are used throughout in case the rendered
-       markup has extra wrapper divs between levels. Pillar/rollup history radios
-       have different labels ("Jump to submission" / "Jump to rollup"), so they
-       cannot match this selector. */
-    div[role="radiogroup"][aria-label="View"] {
+    /* Scoped via aria-label ("View" for the top-level pillar/rollup switcher,
+       "Section" for each pillar's Generate/History/Team switcher — both use
+       the widget's label param, kept for a11y even though
+       label_visibility="collapsed" hides it visually). This avoids relying
+       on aria-orientation, which this Streamlit build does not appear to
+       emit. Descendant combinators (not >) are used throughout in case the
+       rendered markup has extra wrapper divs between levels. Pillar/rollup
+       history radios have different labels ("Jump to submission" / "Jump to
+       rollup"), so they cannot match this selector. */
+    div[role="radiogroup"][aria-label="View"],
+    div[role="radiogroup"][aria-label="Section"] {
         display: flex !important;
         flex-direction: row !important;
         flex-wrap: nowrap !important;
@@ -2401,11 +2402,12 @@ st.markdown(
         padding-bottom: 4px;
     }
 
-    /* Each option: pill/box tab matching the Generate/History/Team sub-tabs
-       (.stTabs styling below). Padding and font-size are tightened (vs. a
-       naive 1rem/16px) so all labels fit on one line without scrolling on a
-       normal desktop viewport, regardless of how many pillars this org has. */
-    div[role="radiogroup"][aria-label="View"] label {
+    /* Each option: pill/box tab matching the previous .stTabs look. Padding
+       and font-size are tightened (vs. a naive 1rem/16px) so all labels fit
+       on one line without scrolling on a normal desktop viewport, regardless
+       of how many pillars this org has. */
+    div[role="radiogroup"][aria-label="View"] label,
+    div[role="radiogroup"][aria-label="Section"] label {
         display: flex !important;
         align-items: center;
         margin: 0 !important;
@@ -2423,29 +2425,35 @@ st.markdown(
     }
 
     /* Hide the radio circle wherever it lives in the label's markup. */
-    div[role="radiogroup"][aria-label="View"] label > div:first-child {
+    div[role="radiogroup"][aria-label="View"] label > div:first-child,
+    div[role="radiogroup"][aria-label="Section"] label > div:first-child {
         display: none !important;
     }
-    div[role="radiogroup"][aria-label="View"] input[type="radio"] {
+    div[role="radiogroup"][aria-label="View"] input[type="radio"],
+    div[role="radiogroup"][aria-label="Section"] input[type="radio"] {
         display: none !important;
     }
 
     /* Hover: light orange tint, matching other hover affordances in the app. */
-    div[role="radiogroup"][aria-label="View"] label:hover {
+    div[role="radiogroup"][aria-label="View"] label:hover,
+    div[role="radiogroup"][aria-label="Section"] label:hover {
         border-color: #f05a28 !important;
         color: #f05a28 !important;
         background-color: #fff3ee !important;
     }
 
-    /* Active label: solid orange pill, matching .stTabs [aria-selected="true"]. */
-    div[role="radiogroup"][aria-label="View"] label:has(input:checked) {
+    /* Active label: solid orange pill, matching the old .stTabs [aria-selected="true"]. */
+    div[role="radiogroup"][aria-label="View"] label:has(input:checked),
+    div[role="radiogroup"][aria-label="Section"] label:has(input:checked) {
         background-color: #f05a28 !important;
         border-color: #f05a28 !important;
         color: #ffffff !important;
         font-weight: 600 !important;
     }
     div[role="radiogroup"][aria-label="View"] label[aria-checked="true"],
-    div[role="radiogroup"][aria-label="View"] label:has([aria-checked="true"]) {
+    div[role="radiogroup"][aria-label="View"] label:has([aria-checked="true"]),
+    div[role="radiogroup"][aria-label="Section"] label[aria-checked="true"],
+    div[role="radiogroup"][aria-label="Section"] label:has([aria-checked="true"]) {
         background-color: #f05a28 !important;
         border-color: #f05a28 !important;
         color: #ffffff !important;

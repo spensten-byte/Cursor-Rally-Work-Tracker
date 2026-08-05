@@ -1785,9 +1785,10 @@ def render_pillar(pillar: Pillar) -> None:
         lead_emails = leads.get(pillar.slug, [])
         members_by_slug = _cached_pillar_members()
         current = members_by_slug.get(pillar.slug, [])
-        is_lead = bool(lead_emails) and _current_user.strip().lower() in {
-            e.strip().lower() for e in lead_emails
-        }
+        is_lead = settings.is_admin(_current_user) or (
+            bool(lead_emails)
+            and _current_user.strip().lower() in {e.strip().lower() for e in lead_emails}
+        )
 
         director_label = (
             ", ".join(_display_name_from_email(e) for e in lead_emails)

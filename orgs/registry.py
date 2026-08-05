@@ -59,7 +59,7 @@ ORGS: dict[str, OrgConfig] = {
         # ever reads/writes within PASE_TRACKER_VOLUME, so this never crosses
         # into PaSE's pase_work_tracker volume.
         volume_path="/Volumes/development/team_na_pase_process_intelligence/scpo_process_excellence",
-        admin_emails="Stacey.McQuain@nike.com,Monica.Buys@nike.com",
+        admin_emails="Stacey.McQuain@nike.com,Monica.Buys@nike.com,Spencer.Stendel@nike.com,Evan.Horne@nike.com",
         pillars_file="orgs/scpo/pillars.json",
         # Placeholder "SCPO Process Excellence" folder (currently nested under
         # PaSE's own "Process Intelligence" Box tree) — Stacey's team will move

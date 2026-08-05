@@ -80,7 +80,7 @@ ORGS: dict[str, OrgConfig] = {
                         # weekly_status_digest.py's Friday "who hasn't submitted"
                         # DM — defaults to Spencer for PaSE; SCPO wants it to go
                         # to its own leads instead (comma-separated for multiple).
-                        "RALLY_DIGEST_RECIPIENT": "Stacey.McQuain@nike.com,Monica.Buys@nike.com",
+                        "RALLY_DIGEST_RECIPIENT": "Stacey.McQuain@nike.com,Monica.Buys@nike.com,Erin.Bestkuenzel@nike.com,Jennifer.Maslen@nike.com",
                     },
                 ),
 }

@@ -1072,7 +1072,21 @@ def render_pillar(pillar: Pillar) -> None:
     else:
         st.info("No submissions yet for this pillar.")
 
-    sub_gen, sub_hist, sub_team = st.tabs(["Generate", "History", "Team"])
+    # Keep the Team sub-tab selected across the rerun triggered by the
+    # "Edit team" / "Save team" / "Cancel" buttons below (st.tabs snaps back
+    # to "Generate" — the first tab — on every st.rerun() unless told
+    # otherwise). `_team_stay_key` is a one-shot flag: the button handlers set
+    # it right before calling st.rerun(), and popping it here consumes it so
+    # it only pins the very next render — later, unrelated reruns (e.g. from
+    # the Generate tab) fall back to normal tab behavior instead of getting
+    # stuck on Team.
+    _team_editing_key = f"team_editing_{pillar.slug}"
+    _team_stay_key = f"team_tab_stay_{pillar.slug}"
+    _stay_on_team = st.session_state.pop(_team_stay_key, False)
+    sub_gen, sub_hist, sub_team = st.tabs(
+        ["Generate", "History", "Team"],
+        default="Team" if (st.session_state.get(_team_editing_key) or _stay_on_team) else None,
+    )
 
     # ── Generate ──────────────────────────────────────────────────────────
     with sub_gen:
@@ -1797,7 +1811,7 @@ def render_pillar(pillar: Pillar) -> None:
         )
         st.markdown(f"**Director:** {director_label}")
 
-        editing_key = f"team_editing_{pillar.slug}"
+        editing_key = _team_editing_key
         is_editing = st.session_state.get(editing_key, False)
 
         if is_lead and is_editing:
@@ -1831,9 +1845,11 @@ def render_pillar(pillar: Pillar) -> None:
                     except Exception as exc:
                         st.warning(f"Team saved, but the prompt could not be updated automatically: {exc}")
                     st.session_state[editing_key] = False
+                    st.session_state[_team_stay_key] = True
                     st.rerun()
             if cancel_col.button("Cancel", key=f"members_cancel_{pillar.slug}"):
                 st.session_state[editing_key] = False
+                st.session_state[_team_stay_key] = True
                 st.rerun()
         else:
             if current:
